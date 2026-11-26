@@ -19,12 +19,12 @@ dialog.sheet.closing::backdrop { animation: scrim-out 0.22s linear forwards; }
   max-height: calc(100dvh - var(--safe-top) - 24px);
   padding-bottom: var(--safe-bottom);
   transition: transform 0.25s var(--ease);
-  animation: sheet-in 0.28s var(--ease);
   will-change: transform; backface-visibility: hidden; contain: layout paint; outline: none;
 }
 .sheet-tall .sheet-panel { height: calc(88dvh - var(--safe-top)); }
 .sheet-full .sheet-panel { height: calc(100dvh - var(--safe-top) - 8px); max-width: 900px; }
-@keyframes sheet-in { from { transform: translateY(100%); } }
+/* Phones: Sheet.tsx slides the panel in by its height in pixels (not a CSS translateY(100%), which changes distance
+   mid-slide when content loading makes the panel taller). */
 
 @media (min-width: 700px) {
   dialog.sheet { align-items: center; padding: 24px; }

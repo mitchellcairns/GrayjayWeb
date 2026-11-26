@@ -185,7 +185,7 @@ function SourceDetailsView(props: { id: string; onChanged: () => void; onRemoved
   };
 
   return (
-    <Show when={d()} fallback={<div class="feed-status"><div class="spinner" /></div>}>
+    <Show when={d()} fallback={<div class="feed-status" style={{ "min-height": "300px" }}><div class="spinner" /></div>}>
       <div class="stack">
         <div class="row">
           <SourceIcon config={d()!.config} size={56} />

@@ -25,6 +25,7 @@ export default function Sheet(props: {
   let panel!: HTMLDivElement;
   const [shown, setShown] = createSignal(false);
   let closing = false;
+  let lastH = 0;
   let closeTimer = 0;
   let disposed = false;
 
@@ -48,6 +49,15 @@ export default function Sheet(props: {
       // moment (it slides in), so the browser dragged the whole sheet up. Undo that and focus the panel itself.
       dialog.scrollTop = 0;
       panel.focus({ preventScroll: true });
+      // Slide up by the panel's height in pixels. (A CSS translateY(100%) is relative to the current height, so when
+      // content loaded mid-slide and the panel grew, the slide distance changed on the spot and the panel jumped.)
+      // Measured in a microtask: the content is rendered after this effect finishes (still before anything is painted).
+      if (!wide() && !reduced()) queueMicrotask(() => {
+        if (!dialog.open || closing) return;
+        lastH = panel.offsetHeight;
+        panel.animate([{ transform: `translateY(${lastH}px)` }, { transform: "translateY(0)" }],
+          { duration: 280, easing: "cubic-bezier(0.2, 0.8, 0.2, 1)" });
+      });
     }
   };
 
@@ -88,9 +98,8 @@ export default function Sheet(props: {
   createEffect(() => { if (props.open) openNow(); else closeAnimated(); });
 
   // Content that loads after opening makes the panel taller in one frame (its top jumps up). Slide the extra height in
-  // instead. Added on top of whatever else is moving it, so it also works mid slide-in. Phones only: a centred dialog
-  // grows both ways.
-  let lastH = 0;
+  // instead. Added on top of whatever else is moving it (all in pixels), so the top stays put even mid slide-in.
+  // Phones only: a centred dialog grows both ways.
   const ro = new ResizeObserver(() => {
     const h = panel.offsetHeight;
     const grew = h - lastH;

@@ -44,7 +44,8 @@ export default function PairDevice() {
 
   return (
     <div class="pair-device">
-      <Show when={data()} fallback={<div class="feed-status"><div class="spinner" /></div>}>
+      {/* Reserves about the QR code's room while loading, so the sheet opens at roughly its final height. */}
+      <Show when={data()} fallback={<div class="feed-status" style={{ "min-height": "min(72vw, 280px)" }}><div class="spinner" /></div>}>
         <Show when={link()} fallback={<p class="muted">No network address found for this server. Connect it to Wi-Fi or Tailscale.</p>}>
           <div class="qr" innerHTML={qrSvg(link()!.url)} aria-label="Pairing QR code" />
           <p class="muted" style={{ "text-align": "center" }}>Scan with your phone's camera, then tap <b>Add to Home Screen</b> for the app experience.</p>
