@@ -68,3 +68,13 @@ html:has(.watch[data-mode="full"]) .tabbar { visibility: hidden; }
   background: var(--bg-elev-2); box-shadow: var(--shadow); font-size: 14px; font-weight: 600;
 }
 .tabbar[hidden] { display: none !important; }
+
+/* Pull-to-refresh indicator (global: used by several pages) */
+.ptr {
+  position: fixed; z-index: 29; left: 50%; top: calc(var(--topbar-h) + var(--safe-top) - 36px); transform: translate(-50%, 0);
+  width: 36px; height: 36px; border-radius: 50%; background: var(--bg-elev-2); display: grid; place-items: center; opacity: 0;
+  box-shadow: var(--shadow); transition: transform 0.2s var(--ease), opacity 0.2s; pointer-events: none;
+}
+.ptr .spinner { width: 18px; height: 18px; border-width: 2px; animation-play-state: paused; }
+.ptr.busy { transform: translate(-50%, 70px) !important; opacity: 1 !important; }
+.ptr.busy .spinner { animation-play-state: running; }

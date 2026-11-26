@@ -64,7 +64,7 @@ export interface Channel {
 }
 
 export interface Subscription { channel: Channel; lastVideo?: number; doNotifications?: boolean }
-export interface SubscriptionGroup { id: string; name: string; urls: string[]; priority: number; image?: any }
+export interface SubscriptionGroup { id: string; name: string; urls: string[]; priority: number; image?: any; lastChange?: string; creationTime?: string }
 
 export interface SourceConfig {
   id: string; name: string; description?: string; version: number; author?: string; authorUrl?: string;
@@ -101,6 +101,11 @@ export const home = {
 export const subscriptions = {
   list: () => get<Subscription[]>("/subscriptions/Subscriptions"),
   loadLazy: (updated = false) => get<PagerResult<Content>>(`/subscriptions/SubscriptionsLoadLazy?updated=${updated}`),
+  /** Cached feed from the local database: instant, shown while the live feed refreshes. */
+  cacheLoad: () => get<PagerResult<Content>>("/subscriptions/SubscriptionsCacheLoad"),
+  cacheNext: () => get<PagerResult<Content>>("/subscriptions/SubscriptionsCacheNextPage"),
+  groupSave: (group: SubscriptionGroup) => post<SubscriptionGroup>("/subscriptions/SubscriptionGroupSave", group),
+  groupDelete: (id: string) => get(`/subscriptions/SubscriptionGroupDelete?id=${q(id)}`),
   next: () => get<PagerResult<Content>>("/subscriptions/SubscriptionsNextPage"),
   groups: () => get<SubscriptionGroup[]>("/subscriptions/SubscriptionGroups"),
   groupLoad: (id: string, updated = false) => get<PagerResult<Content>>(`/subscriptions/SubscriptionGroupLoad?id=${q(id)}&updated=${updated}`),
@@ -111,8 +116,8 @@ export const subscriptions = {
 };
 
 export const search = {
-  loadLazy: (query: string, type: number = ContentType.MEDIA, filters?: Record<string, string[]>, excludePlugins?: string[]) =>
-    post<PagerResult<Content>>("/search/SearchLoadLazy", { type, query, filters, excludePlugins }),
+  loadLazy: (query: string, type: number = ContentType.MEDIA, filters?: Record<string, string[]>, excludePlugins?: string[], order?: string) =>
+    post<PagerResult<Content>>("/search/SearchLoadLazy", { type, query, order, filters, excludePlugins }),
   next: () => get<PagerResult<Content>>("/search/SearchNextPage"),
   suggestions: (query: string) => get<string[]>(`/search/SearchSuggestions?query=${q(query)}`),
   previous: () => get<string[]>("/search/PreviousSearches"),
@@ -167,6 +172,8 @@ export const details = {
 // ---------- Sources (plugins) ----------
 export const sources = {
   all: () => get<SourceConfig[]>("/sources/Sources"),
+  /** Per-source state incl. capabilitiesSearch {types, sorts, filters}. */
+  states: () => get<any[]>("/sources/SourceStates"),
   enabled: () => get<SourceConfig[]>("/sources/SourcesEnabled"),
   disabled: () => get<SourceConfig[]>("/sources/SourcesDisabled"),
   details: (id: string) => get<SourceDetails>(`/sources/SourceDetails?id=${q(id)}`),

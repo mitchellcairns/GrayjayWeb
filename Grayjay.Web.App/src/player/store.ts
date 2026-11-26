@@ -1,16 +1,13 @@
 // Global playback state. There is exactly one <video> in the app (inside WatchOverlay), so playback survives navigation.
 import { batch, createRoot, createSignal } from "solid-js";
 import { Content, SourceDescriptor, VideoDetails, details, history as historyApi } from "../api";
+import { pickVideoIndex, targetHeight } from "../lib/quality";
+import { stored } from "../lib/stored";
+export { stored };
 
 export type PlayerMode = "closed" | "full" | "mini";
 
 // ---------- Remembered preferences ----------
-function stored<T>(key: string, fallback: T) {
-  let initial = fallback;
-  try { const v = localStorage.getItem(key); if (v != null) initial = JSON.parse(v); } catch { }
-  const [get, set] = createSignal<T>(initial);
-  return [get, (v: T) => { set(() => v); try { localStorage.setItem(key, JSON.stringify(v)); } catch { } }] as const;
-}
 
 export interface MiniRect { x: number; y: number; w: number }
 
@@ -94,18 +91,22 @@ function createPlayerStore() {
       const duration = v.duration ?? 0;
       // Resume where you left off unless you'd finished it.
       setStartAt(position && duration && position < duration - 15 ? position : 0);
-      let src = await details.sourceAuto(target);
+      let [src, maxHeight] = await Promise.all([details.sourceAuto(target), targetHeight().catch(() => 0)]);
       if (token !== loadToken) return;
+      const vi0 = src.videoIndex ?? -1;
+      // Default quality for this device/connection (Settings → Playback quality).
+      let vi = vi0 >= 0 && maxHeight > 0 ? pickVideoIndex(v.video?.videoSources ?? [], vi0, maxHeight) : vi0;
       // Turn captions on automatically if you had them on last time (preferring your language).
+      let si = src.subtitleIndex ?? -1;
       const pref = prefs.captions();
       const subs = v.subtitles ?? [];
-      if (pref !== "off" && subs.length && (src.subtitleIndex ?? -1) < 0 && (src.videoIndex ?? -1) >= 0) {
-        let si = subs.findIndex((s: any) => s.language && s.language === pref);
+      if (pref !== "off" && subs.length && si < 0 && vi0 >= 0) {
+        si = subs.findIndex((s: any) => s.language && s.language === pref);
         if (si < 0 && pref === "on") si = 0;
-        if (si >= 0) {
-          try { src = await details.sourceProxy(target, src.videoIndex!, src.audioIndex ?? -1, si); } catch { }
-          if (token !== loadToken) return;
-        }
+      }
+      if (vi0 >= 0 && (vi !== vi0 || si !== (src.subtitleIndex ?? -1))) {
+        try { src = await details.sourceProxy(target, vi, src.audioIndex ?? -1, si); } catch { }
+        if (token !== loadToken) return;
       }
       setSource(src);
     } catch (e: any) {

@@ -10,6 +10,8 @@ export interface Pager<T> {
   hasMore: () => boolean;
   error: () => Error | null;
   loaded: () => boolean;
+  /** True once the server pushed a PagerUpdated for this pager (lazy pagers: real results replaced placeholders). */
+  updated: () => boolean;
   next: () => Promise<void>;
   reload: () => Promise<void>;
 }
@@ -24,6 +26,7 @@ export function createPager<T>(
   const [hasMore, setHasMore] = createSignal(true);
   const [error, setError] = createSignal<Error | null>(null);
   const [loaded, setLoaded] = createSignal(false);
+  const [updated, setUpdated] = createSignal(false);
   let pagerId: string | undefined;
   let generation = 0;
   let firstPageSize = 0;
@@ -33,9 +36,10 @@ export function createPager<T>(
   const off = on<PagerResult<T>>("PagerUpdated", (packet) => {
     if (!pagerId || packet.id !== pagerId) return;
     // Like the desktop client, an update carries the pager's full refreshed result set (placeholders resolved).
-    const updated = keep(packet.payload?.results ?? []);
-    setItems(updated);
-    firstPageSize = updated.length;
+    const results = keep(packet.payload?.results ?? []);
+    setItems(results);
+    firstPageSize = results.length;
+    setUpdated(true);
     if (packet.payload && typeof packet.payload.hasMore === "boolean") setHasMore(packet.payload.hasMore);
   });
   onCleanup(off);
@@ -68,7 +72,7 @@ export function createPager<T>(
   }
 
   const pager: Pager<T> = {
-    items, loading, hasMore, error, loaded,
+    items, loading, hasMore, error, loaded, updated,
     async next() {
       if (loading() || !hasMore()) return;
       await run(next, false);
@@ -77,6 +81,7 @@ export function createPager<T>(
       generation++;
       setHasMore(true);
       setLoaded(false);
+      setUpdated(false);
       await run(load, true);
       // Skip the eager second page while the first is still lazy placeholders (it would only add more placeholders).
       const allPlaceholders = items().length > 0 && items().every((x: any) => x?.contentType === 90);

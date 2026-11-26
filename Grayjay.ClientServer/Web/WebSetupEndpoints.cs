@@ -17,6 +17,8 @@ namespace Grayjay.ClientServer.Web
     public static class WebSetupEndpoints
     {
         private const long MaxUpload = 512L * 1024 * 1024;
+        // Incompressible bytes so proxies/tunnels can't inflate the measured speed.
+        private static readonly Lazy<byte[]> SpeedTestBlock = new Lazy<byte[]>(() => System.Security.Cryptography.RandomNumberGenerator.GetBytes(256 * 1024));
         private static string SetupFile => Path.Combine(Directories.Base, "web_setup.json");
 
         public static void Map(IEndpointRouteBuilder app)
@@ -95,6 +97,23 @@ namespace Grayjay.ClientServer.Web
                 var bytes = ToZipBytes(export);
                 var name = $"grayjay-backup-{DateTime.Now:yyyy-MM-dd}.zip";
                 return Results.File(bytes, "application/zip", name);
+            });
+
+            // Speed test for "Auto" playback quality: the client times downloading N bytes from this server.
+            app.MapGet("/web/speedtest", async (HttpContext ctx, int? bytes) =>
+            {
+                long total = Math.Clamp(bytes ?? 2_000_000, 64_000, 25_000_000);
+                ctx.Response.ContentType = "application/octet-stream";
+                ctx.Response.ContentLength = total;
+                ctx.Response.Headers["Cache-Control"] = "no-store";
+                var block = SpeedTestBlock.Value;
+                long sent = 0;
+                while (sent < total && !ctx.RequestAborted.IsCancellationRequested)
+                {
+                    int n = (int)Math.Min(block.Length, total - sent);
+                    await ctx.Response.Body.WriteAsync(block.AsMemory(0, n), ctx.RequestAborted);
+                    sent += n;
+                }
             });
 
             // Grayjay Sync: link this server with Grayjay on another device (phone or desktop) by QR code.

@@ -8,11 +8,11 @@
 .search-suggest .list-item { min-height: 48px; }
 .search-suggest svg { color: var(--text-3); flex: none; }
 
-.ptr {
-  position: fixed; z-index: 29; left: 50%; top: calc(var(--topbar-h) + var(--safe-top) - 36px); transform: translate(-50%, 0);
-  width: 36px; height: 36px; border-radius: 50%; background: var(--bg-elev-2); display: grid; place-items: center; opacity: 0;
-  box-shadow: var(--shadow); transition: transform 0.2s var(--ease), opacity 0.2s; pointer-events: none;
-}
-.ptr .spinner { width: 18px; height: 18px; border-width: 2px; animation-play-state: paused; }
-.ptr.busy { transform: translate(-50%, 70px) !important; opacity: 1 !important; }
-.ptr.busy .spinner { animation-play-state: running; }
+
+.search-chips { margin-bottom: 16px; align-items: center; }
+.chip-divider { width: 1px; height: 22px; background: var(--line); flex: none; }
+.chip { display: inline-flex; align-items: center; gap: 6px; }
+.chip.removable { background: color-mix(in srgb, var(--accent) 18%, var(--bg-elev-2)); }
+.search-filters .filter-title { font-weight: 700; margin-bottom: 8px; }
+.chip-wrap { display: flex; flex-wrap: wrap; gap: 8px; }
+.source-chip img { width: 16px; height: 16px; border-radius: 4px; object-fit: contain; }

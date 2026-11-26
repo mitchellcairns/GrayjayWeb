@@ -6,6 +6,7 @@ import { formatAgo } from "../lib/format";
 import Icon from "../components/Icon";
 import Sheet from "../components/Sheet";
 import PairDevice from "../components/PairDevice";
+import PlaybackSettings from "../components/PlaybackSettings";
 import { toast, toastError } from "../components/Toasts";
 import PageHeader from "../shell/PageHeader";
 
@@ -63,6 +64,9 @@ export default function Settings() {
             )}
           </For>
         </div>
+
+        <h2 class="section-title">Playback quality <span class="faint" style={{ "font-size": "13px", "font-weight": 500 }}>this device</span></h2>
+        <PlaybackSettings />
 
         <Show when={!standalone}>
           <h2 class="section-title">Install the app</h2>

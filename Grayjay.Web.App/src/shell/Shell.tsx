@@ -1,4 +1,4 @@
-import { JSX, Suspense, createEffect, on, onMount } from "solid-js";
+import { JSX, createEffect, on, onMount } from "solid-js";
 import { A, useLocation, useNavigate, useSearchParams } from "@solidjs/router";
 import { setup } from "../api";
 import CustomDialogs from "./CustomDialogs";
@@ -46,9 +46,9 @@ export default function Shell(props: { children?: JSX.Element }) {
 
   return (
     <>
-      <Suspense fallback={<div class="page"><div class="feed-status"><div class="spinner" /></div></div>}>
-        {props.children}
-      </Suspense>
+      {/* No <Suspense> here on purpose: any resource refetch inside a page (e.g. search suggestions on each keystroke)
+          would swap the whole page for the fallback and rebuild it, losing input focus. Pages handle loading themselves. */}
+      {props.children}
 
       <WatchOverlay />
 

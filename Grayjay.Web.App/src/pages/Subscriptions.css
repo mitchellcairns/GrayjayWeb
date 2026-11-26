@@ -1,0 +1,8 @@
+.sub-chips { margin-bottom: 14px; align-items: center; }
+.chip-edit { display: inline-flex; align-items: center; gap: 5px; background: transparent; border: 1px dashed var(--line); }
+.sub-progress { position: fixed; z-index: 31; left: var(--rail-w); right: 0; top: calc(var(--topbar-h) + var(--safe-top)); height: 3px; background: color-mix(in srgb, var(--accent) 18%, transparent); }
+.sub-progress > div { height: 100%; background: var(--accent); transition: width 0.3s var(--ease); }
+.group-order { display: flex; flex-direction: column; }
+.group-order .icon-btn { width: 28px; height: 22px; border-radius: 6px; }
+.group-open { background: none; border: 0; text-align: left; cursor: pointer; padding: 0; color: inherit; min-width: 0; }
+.group-channels { max-height: 50vh; overflow-y: auto; }
