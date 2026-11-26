@@ -3,6 +3,7 @@ import type { SourceDescriptor, VideoDetails } from "../api";
 import { details as detailsApi } from "../api";
 import { bestThumbnail, formatDuration } from "../lib/format";
 import Icon from "../components/Icon";
+import { offline } from "../lib/offline";
 import { player, prefs } from "./store";
 import { QueueButton } from "../components/GlobalSheets";
 import { consumeSuppressedTap } from "./gesture";
@@ -507,6 +508,7 @@ export default function VideoPlayer(props: {
     if (!force && now - lastReport < 10000) return;
     lastReport = now;
     detailsApi.watchProgress(u, el.currentTime).catch(() => { });
+    if (offline.has(u)) offline.setPosition(u, el.currentTime); // resume works offline too
   };
   const onPageHide = () => reportProgress(true);
   addEventListener("pagehide", onPageHide);

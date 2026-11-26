@@ -83,3 +83,11 @@ html:has(.watch[data-mode="full"]) .tabbar { visibility: hidden; }
 .ptr .spinner { width: 18px; height: 18px; border-width: 2px; animation-play-state: paused; }
 .ptr.busy { transform: translate(-50%, 70px) !important; opacity: 1 !important; }
 .ptr.busy .spinner { animation-play-state: running; }
+
+/* [GrayjayWeb] Watching downloads with no server connection. */
+.offline-banner {
+  position: fixed; z-index: 60; left: 12px; right: 12px; bottom: calc(env(safe-area-inset-bottom) + 76px);
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 8px 8px 8px 14px; border-radius: 12px; font-size: 13px;
+  background: var(--bg-elev-2); border: 1px solid var(--line); box-shadow: 0 6px 24px rgb(0 0 0 / 0.35);
+}

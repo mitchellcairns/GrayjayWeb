@@ -142,6 +142,8 @@ namespace Grayjay.ClientServer
                 WebHiddenCreators.Map(_app);
                 WebDeviceSync.Map(_app);
                 WebLinks.Map(_app);
+                WebDownloads.Map(_app);
+                StateCache.StartPruning();
                 MapWebApp(_app, Web);
                 WebEndpointsHook?.Invoke(_app);
             }

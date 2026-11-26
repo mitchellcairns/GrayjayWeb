@@ -1,4 +1,5 @@
-﻿using Grayjay.ClientServer.Database;
+﻿using Dapper;
+using Grayjay.ClientServer.Database;
 using Grayjay.ClientServer.Database.Indexes;
 using Grayjay.ClientServer.Store;
 using Grayjay.Desktop.POC;
@@ -21,6 +22,76 @@ namespace Grayjay.ClientServer.States
         public static void Clear()
         {
             _subscriptionCache.DeleteAll();
+        }
+
+        /// <summary>
+        /// [GrayjayWeb] The cache only ever grew (upstream issue #972): every feed refresh added items and nothing removed
+        /// them, including channels you'd unsubscribed from. Keeps the newest <see cref="MaxCachedPerChannel"/> items of
+        /// each subscribed channel and drops the rest. (The feed only reads subscribed channels' items, so nothing visible
+        /// goes away; anything older comes back from the source when you scroll that far.)
+        /// </summary>
+        public const int MaxCachedPerChannel = 200;
+        private static int _pruning = 0;
+
+        public static int Prune()
+        {
+            if (Interlocked.Exchange(ref _pruning, 1) == 1) return 0;
+            try
+            {
+                var subs = StateSubscriptions.GetSubscriptions();
+                var keep = subs
+                    .SelectMany(s => new[] { s.Channel?.Url }.Concat(s.Channel?.UrlAlternatives ?? new List<string>()))
+                    .Where(u => !string.IsNullOrEmpty(u))
+                    .Distinct()
+                    .ToList();
+                var table = DBSubscriptionCacheIndex.TABLE_NAME;
+                var watch = Stopwatch.StartNew();
+                var (before, removed) = StateApp.Connection.SQL(conn =>
+                {
+                    var count = conn.ExecuteScalar<long>($"SELECT COUNT(*) FROM \"{table}\"");
+                    using var tx = conn.BeginTransaction();
+                    // Items cached without a plugin ID break the feed (upstream issue #1030); they come back properly on refresh.
+                    // (Only when some rows do have one: if the stored format ever changed, this must not wipe everything.)
+                    const string noPlugin = "json_extract(CAST(Serialized AS TEXT), '$.ID.PluginID') IS NULL";
+                    var withoutPlugin = conn.ExecuteScalar<long>($"SELECT COUNT(*) FROM \"{table}\" WHERE {noPlugin}", transaction: tx);
+                    int deleted = withoutPlugin > 0 && withoutPlugin < count
+                        ? conn.Execute($"DELETE FROM \"{table}\" WHERE {noPlugin}", transaction: tx) : 0;
+                    // No subscriptions at all is more likely a load problem than a choice: don't wipe the cache for it.
+                    if (keep.Count > 0)
+                    {
+                        conn.Execute("CREATE TEMP TABLE IF NOT EXISTS gj_keep_channels (url TEXT PRIMARY KEY)", transaction: tx);
+                        conn.Execute("DELETE FROM gj_keep_channels", transaction: tx);
+                        conn.Execute("INSERT OR IGNORE INTO gj_keep_channels (url) VALUES (@u)", keep.Select(u => new { u }), tx);
+                        deleted += conn.Execute($"DELETE FROM \"{table}\" WHERE ChannelUrl IS NULL OR ChannelUrl NOT IN (SELECT url FROM gj_keep_channels)", transaction: tx);
+                    }
+                    deleted += conn.Execute($@"DELETE FROM ""{table}"" WHERE ID IN (
+                        SELECT ID FROM (SELECT ID, ROW_NUMBER() OVER (PARTITION BY ChannelUrl ORDER BY DateTime DESC, ID DESC) AS rn FROM ""{table}"")
+                        WHERE rn > @max)", new { max = MaxCachedPerChannel }, tx);
+                    tx.Commit();
+                    return (count, deleted);
+                });
+                Logger.i(TAG, $"Subscription cache: removed {removed} of {before} items ({keep.Count} subscribed channel addresses, {watch.ElapsedMilliseconds}ms)");
+                // Deleted rows leave free pages behind; give a big clean-up's space back to the disk.
+                if (removed > 10_000)
+                {
+                    try { StateApp.Connection.SQL(conn => conn.Execute("VACUUM")); }
+                    catch (Exception ex) { Logger.w(TAG, "Couldn't compact the database after pruning: " + ex.Message); }
+                }
+                return removed;
+            }
+            catch (Exception ex)
+            {
+                Logger.e(TAG, "Failed to prune the subscription cache", ex);
+                return 0;
+            }
+            finally { Interlocked.Exchange(ref _pruning, 0); }
+        }
+
+        private static Timer? _pruneTimer;
+        /// <summary>[GrayjayWeb] Prunes a few minutes after start, then twice a day (the server stays on for weeks).</summary>
+        public static void StartPruning()
+        {
+            _pruneTimer ??= new Timer(_ => Prune(), null, TimeSpan.FromMinutes(3), TimeSpan.FromHours(12));
         }
 
         public static void ClearToday()
@@ -107,6 +178,9 @@ namespace Grayjay.ClientServer.States
             {
                 return false;
             }
+            // [GrayjayWeb] An item without a plugin ID crashed the cached feed for everyone (upstream issue #1030).
+            if (string.IsNullOrEmpty(content.ID?.PluginID))
+                return false;
 
             var serialized = content;//SerializedPlatformContent.FromContent(content);
             var existing = GetCachedContent(content.Url);

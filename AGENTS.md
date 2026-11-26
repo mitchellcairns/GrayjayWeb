@@ -123,6 +123,7 @@ After=network-online.target
 [Service]
 User=grayjay
 Environment=GRAYJAY_DATA_DIR=/var/lib/grayjay GRAYJAY_PUBLIC_URLS=http://10.8.0.1:11338
+WorkingDirectory=/opt/grayjay
 ExecStart=/opt/grayjay/GrayjayWebServer
 Restart=on-failure
 [Install]
@@ -163,6 +164,12 @@ location / {
    **Grayjay backup .zip** import (Android *Export*), **YouTube Takeout `subscriptions.csv` / NewPipe `.json`** import,
    source selection, and sign-in. Reopen later from Settings → *Import & sync*.
 3. YouTube extras (SponsorBlock, Return YouTube Dislike, DeArrow): Sources → YouTube → Settings.
+4. **Downloads / offline:** ⋮ → *Download* (or *Download* on the watch page), pick a quality. The server downloads it into
+   `<data dir>/downloads` (Grayjay's own downloader, H.264/AAC preferred so iPhones can play it), joins video + audio
+   with the bundled FFmpeg, then the phone copies the file into its own storage (IndexedDB). Downloads are in
+   Library → Downloads and play with no connection. Opening the app with the server unreachable offers
+   *Watch your downloads*; that needs the installed app over **HTTPS** (the service worker caches the app itself).
+   Videos another device downloaded show under *On your server* with *Save here*.
 
 ## Troubleshooting
 
@@ -179,6 +186,8 @@ location / {
 | Videos don't play on iPhone | Needs iOS 17.1+ (Managed Media Source) for most YouTube formats |
 | Docker build fails with "Git LFS pointer files" | `git lfs install && git lfs pull --include "Grayjay.ClientServer/deps/linux-x64/**"` |
 | `docker compose pull` → `denied` | The GHCR package isn't public yet (owner: Package settings → Change visibility → Public), or build from source |
+| A download fails or stops at "Downloading on your server" | Check the server log. Sources sometimes drop the connection mid-download; the app retries twice. "FFmpeg isn't available": run the server from its own folder (the bundled `ffmpeg` is found relative to the working directory; set `WorkingDirectory` in systemd) or install ffmpeg on Linux |
+| "Not enough storage space on this device" | The phone's browser storage is full; remove downloads (Library → Downloads) or free space. Installed apps get more room than browser tabs, especially on iPhone |
 | Import from backup shows problems for some items | Expand "Some items couldn't be imported"; usually videos/channels that no longer exist or a source that isn't enabled |
 
 ## Development
@@ -200,6 +209,10 @@ cd Grayjay.Web.Tray; cargo run                                                  
 
 Conventions:
 - Mark changes to upstream files with `[GrayjayWeb]` comments; keep upstream edits minimal so merges from FUTO stay easy.
+- FUTO's submodules (`SyncServer`, `Grayjay.Engine`, …) can't be committed to. Small fixes to them live in
+  `Grayjay.Web.Host/UpstreamPatches/` as exact find/replace pairs, applied to the submodule checkout before it compiles in
+  every build (dotnet run, build-web.ps1, Docker). A build warning means upstream changed that code: check whether the
+  patch is still needed and remove it if FUTO fixed it. A patched submodule shows as modified in `git status`; that's expected.
 - All media URLs must be same-origin and relative in web mode (`BaseUrl` is `""`; proxy entries are `/hp/{id}`).
 - Every non-public route is behind `WebAuthMiddleware`; add new public paths to `WebAuth.IsPublicPath` only deliberately.
 - Plain-HTTP LAN origins are not secure contexts: don't use `crypto.randomUUID`, Clipboard, etc. without fallbacks.

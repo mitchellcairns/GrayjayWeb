@@ -15,6 +15,8 @@ import { skip } from "./skip";
 import { hidden } from "../lib/hidden";
 import { ui } from "../lib/ui";
 import { watchLater } from "../lib/watchLater";
+import { offline } from "../lib/offline";
+import { downloadAction } from "../components/GlobalSheets";
 import { QueueList } from "../components/GlobalSheets";
 import { suppressNextTap } from "./gesture";
 import { MiniRect, player, prefs, registerPlayerBox } from "./store";
@@ -290,6 +292,13 @@ export default function WatchOverlay() {
                   onClick={() => watchLater.toggle(v()!).then((added) => toast(added ? "Saved to Watch later" : "Removed from Watch later", "info", 1800)).catch(toastError)}>
                   <Icon name={watchLater.has(v()?.url) ? "check" : "later"} size={18} /> {watchLater.has(v()?.url) ? "Saved" : "Save"}
                 </button>
+                <Show when={!v()?.isLive}>
+                  <button class="btn small" classList={{ "is-on": offline.has(player.url()) }} disabled={!player.url()}
+                    onClick={() => downloadAction({ url: player.url()!, name: meta()?.name ?? v()?.name ?? "" })}>
+                    <Icon name={offline.has(player.url()) ? "check" : "download"} size={18} />{" "}
+                    {offline.has(player.url()) ? "Downloaded" : offline.busy(player.url()) ? `${Math.round((offline.job(player.url())?.progress ?? 0) * 100)}%` : "Download"}
+                  </button>
+                </Show>
                 <button class="btn small" onClick={share}><Icon name="share" size={18} /> Share</button>
                 <button class="btn small" onClick={() => setCommentsOpen(true)}><Icon name="comment" size={18} /> Comments</button>
                 <a class="btn small" href={v()?.shareUrl || v()?.url} target="_blank" rel="noreferrer"><Icon name="external" size={18} /> Open</a>

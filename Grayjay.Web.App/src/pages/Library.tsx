@@ -7,6 +7,8 @@ import Icon from "../components/Icon";
 import PageHeader from "../shell/PageHeader";
 import { watchLater } from "../lib/watchLater";
 import { toastError } from "../components/Toasts";
+import Downloads from "../components/Downloads";
+import { offlineMode } from "../lib/offline";
 
 export default function Library() {
   const [query, setQuery] = createSignal("");
@@ -14,7 +16,7 @@ export default function Library() {
     () => (query() ? historyApi.search(query()) : historyApi.load()),
     () => historyApi.next(),
   );
-  onMount(() => pager.reload());
+  onMount(() => { if (!offlineMode()) pager.reload(); });
 
   let t: number | undefined;
   const onSearch = (v: string) => { setQuery(v); clearTimeout(t); t = window.setTimeout(() => pager.reload(), 250); };
@@ -26,7 +28,9 @@ export default function Library() {
     <>
       <PageHeader title="Library" />
       <main class="page">
-        <h2 class="section-title" style={{ "margin-top": "4px" }}>Watch later <span class="faint" style={{ "font-weight": 500, "font-size": "14px" }}>{watchLater.items().length || ""}</span></h2>
+        <Downloads />
+        <Show when={!offlineMode()}>
+        <h2 class="section-title">Watch later <span class="faint" style={{ "font-weight": 500, "font-size": "14px" }}>{watchLater.items().length || ""}</span></h2>
         <Show when={watchLater.items().length > 0} fallback={
           <p class="muted" style={{ "font-size": "14px" }}>{watchLater.loaded() ? "Nothing saved. Use ⋮ → Save to Watch later on any video, or Save on the watch page." : ""}</p>
         }>
@@ -61,6 +65,7 @@ export default function Library() {
         </Show>
         <Show when={pager.hasMore() && pager.loaded()}>
           <button class="btn block" style={{ "margin-top": "16px" }} disabled={pager.loading()} onClick={() => pager.next()}>Load more</button>
+        </Show>
         </Show>
       </main>
     </>

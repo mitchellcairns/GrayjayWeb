@@ -1,0 +1,1 @@
+                var platformItemMap = sameItems.GroupBy(r => r.ID.PluginID).ToDictionary(group => group.Key, group => group.First());

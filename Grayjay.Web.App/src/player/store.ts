@@ -4,6 +4,7 @@ import { Content, SourceDescriptor, VideoDetails, details, history as historyApi
 import { pickVideoIndex, targetHeight } from "../lib/quality";
 import { stored } from "../lib/stored";
 import { queue } from "./queue";
+import { offline } from "../lib/offline";
 export { stored };
 
 export type PlayerMode = "closed" | "full" | "mini";
@@ -106,6 +107,34 @@ function createPlayerStore() {
   let openedViaPush = false;
   let loadToken = 0;
 
+  // The downloaded copy being played (a blob: URL), released when something else plays.
+  let localUrls: string[] = [];
+  const releaseLocal = () => { localUrls.forEach((u) => URL.revokeObjectURL(u)); localUrls = []; };
+
+  /** Plays the copy on this device: no server needed. Details from the server are added when it's reachable. */
+  async function loadLocal(token: number, target: string, startOverride?: number): Promise<boolean> {
+    const it = offline.get(target);
+    if (!it) return false;
+    const [file, thumb] = await Promise.all([offline.fileUrl(target), offline.thumbUrl(target)]);
+    if (!file) return false;
+    if (token !== loadToken) { URL.revokeObjectURL(file.src); if (thumb) URL.revokeObjectURL(thumb); return true; }
+    releaseLocal();
+    localUrls = [file.src, ...(thumb ? [thumb] : [])];
+    const timeout = <T,>(p: Promise<T>, ms: number) => Promise.race([p, new Promise<never>((_, rej) => setTimeout(() => rej(new Error("timeout")), ms))]);
+    const position = await timeout(historyApi.position(target), 1500).catch(() => 0) || it.position || 0;
+    if (token !== loadToken) return true;
+    setVideo(offline.toDetails(it, thumb));
+    const duration = it.duration || 0;
+    setStartAt(startOverride ?? (position && (!duration || position < duration - 15) ? position : 0));
+    setSource({ url: file.src, type: file.mime, videoIndex: -1, audioIndex: -1, subtitleIndex: -1 });
+    setLoading(false);
+    // Online: the description, comments, likes and Up next from the server (playback stays on the downloaded copy).
+    details.videoLoad(target).then(({ video: v, superseded }) => {
+      if (token === loadToken && v && !superseded) setVideo({ ...v, video: { videoSources: [], audioSources: [] } });
+    }).catch(() => { });
+    return true;
+  }
+
   async function load(target: string, startOverride?: number) {
     const token = ++loadToken;
     queue.remove(target); // playing something you'd queued takes it off the queue
@@ -117,6 +146,9 @@ function createPlayerStore() {
       setStarted(false);
     });
     try {
+      if (offline.has(target) && await loadLocal(token, target, startOverride)) return;
+      if (token !== loadToken) return;
+      releaseLocal();
       const [{ video: v, superseded }, position] = await Promise.all([
         details.videoLoad(target),
         historyApi.position(target).catch(() => 0),
@@ -246,6 +278,7 @@ function createPlayerStore() {
         if (openedViaPush) { openedViaPush = false; nav?.back(); } else nav?.setWatchParam(null, true);
       }
       loadToken++;
+      releaseLocal();
       batch(() => {
         setMode("closed");
         setUrl(null);
@@ -257,6 +290,9 @@ function createPlayerStore() {
     },
 
     retry() { const u = url(); if (u) load(u); },
+
+    /** True while the downloaded copy plays (quality/audio/caption menus don't apply to it). */
+    isLocal: () => !!source()?.url?.startsWith("blob:"),
 
     /** Switch quality, audio track or captions: asks the server for a new proxied source, keeps position. */
     async selectSource(videoIndex: number, audioIndex: number, subtitleIndex = -1) {

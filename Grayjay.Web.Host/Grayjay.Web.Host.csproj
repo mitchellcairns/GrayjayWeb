@@ -44,4 +44,6 @@
     <RemoveDir Directories="$(PublishDir)cef" />
     <Delete Files="$(PublishDir)FUTO.Updater.Client.exe;$(PublishDir)FUTO.Updater.Client" ContinueOnError="true" />
   </Target>
+  <!-- [GrayjayWeb] Fixes to FUTO submodules, applied before they compile (see UpstreamPatches/). -->
+  <Import Project="UpstreamPatches/UpstreamPatches.targets" Condition="Exists('UpstreamPatches/UpstreamPatches.targets')" />
 </Project>

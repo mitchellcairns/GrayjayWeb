@@ -1,4 +1,4 @@
-import { JSX, Match, Switch, createResource, createSignal, lazy, onMount } from "solid-js";
+import { JSX, Match, Show, Switch, createResource, createSignal, lazy, onMount } from "solid-js";
 import { Route, Router } from "@solidjs/router";
 import { auth } from "./api";
 import { onUnauthorized } from "./api/client";
@@ -6,6 +6,7 @@ import { startSocket } from "./api/socket";
 import Shell from "./shell/Shell";
 import PairScreen from "./pages/Pair";
 import Subscriptions from "./pages/Subscriptions";
+import { offline, offlineMode, setOfflineMode } from "./lib/offline";
 
 const Home = lazy(() => import("./pages/Home"));
 const Setup = lazy(() => import("./pages/Setup"));
@@ -22,14 +23,19 @@ export default function App() {
 
   onMount(() => {
     onUnauthorized(() => setForcedOut(true));
+    offline.init();
   });
 
   const authed = () => !forcedOut() && !!status()?.authenticated;
+  const retry = async () => { await refetch(); if (status()) setOfflineMode(false); };
 
   return (
     <Switch fallback={<Splash />}>
+      <Match when={offlineMode()}>
+        <AuthedApp offline onRetry={retry} />
+      </Match>
       <Match when={status.state === "ready" && status() === null}>
-        <Offline onRetry={refetch} />
+        <Offline onRetry={refetch} onDownloads={() => setOfflineMode(true)} />
       </Match>
       <Match when={status.state === "ready" && !authed()}>
         <PairScreen
@@ -44,9 +50,19 @@ export default function App() {
   );
 }
 
-function AuthedApp(): JSX.Element {
+function AuthedApp(props: { offline?: boolean; onRetry?: () => void }): JSX.Element {
   startSocket();
+  if (!props.offline) offline.resume();
+  // No server: only the downloads on this device (Library), with a way back once it's reachable again.
+  if (props.offline && !/^\/app\/library/.test(location.pathname)) history.replaceState(null, "", "/app/library");
   return (
+    <>
+    <Show when={props.offline}>
+      <div class="offline-banner" role="status">
+        <span>No connection to your server · showing your downloads</span>
+        <button class="btn small" onClick={() => props.onRetry?.()}>Retry</button>
+      </div>
+    </Show>
     <Router base="/app" root={Shell}>
       <Route path="/" component={Subscriptions} />
       <Route path="/subscriptions" component={Subscriptions} />
@@ -60,6 +76,7 @@ function AuthedApp(): JSX.Element {
       <Route path="/share" component={Share} />
       <Route path="*" component={Subscriptions} />
     </Router>
+    </>
   );
 }
 
@@ -71,7 +88,7 @@ function Splash() {
   );
 }
 
-function Offline(props: { onRetry: () => void }) {
+function Offline(props: { onRetry: () => void; onDownloads: () => void }) {
   return (
     <div class="splash">
       <div class="empty">
@@ -79,6 +96,9 @@ function Offline(props: { onRetry: () => void }) {
         <h3>Can't reach your Grayjay server</h3>
         <p>Make sure the computer running Grayjay is on, and that this device can reach it (same Wi-Fi, or Tailscale).</p>
         <button class="btn primary" onClick={props.onRetry}>Try again</button>
+        <Show when={offline.items().length > 0}>
+          <button class="btn" onClick={props.onDownloads}>Watch your downloads ({offline.items().length})</button>
+        </Show>
       </div>
     </div>
   );

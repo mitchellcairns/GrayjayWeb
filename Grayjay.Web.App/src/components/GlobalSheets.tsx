@@ -14,6 +14,8 @@ import { toast, toastAction, toastError } from "./Toasts";
 import "./GlobalSheets.css";
 import { ContinueBar } from "./Handoff";
 import { watchLater } from "../lib/watchLater";
+import { DOWNLOAD_QUALITIES, offline } from "../lib/offline";
+import { stored } from "../lib/stored";
 
 /** Hide a creator everywhere, with Undo (it's easy to hit by accident). */
 export async function hideCreator(item: Content) {
@@ -45,6 +47,12 @@ function CardMenu() {
         <button class="list-item" onClick={act((it) => { watchLater.toggle(it).then((added) => toast(added ? "Saved to Watch later" : "Removed from Watch later", "info", 1800)).catch(toastError); })}>
           <Icon name="later" /> <div class="grow title">{watchLater.has(item()?.url) ? "Remove from Watch later" : "Save to Watch later"}</div>
         </button>
+        <Show when={(item()?.contentType ?? 1) === 1 && !item()?.isLive}>
+          <button class="list-item" onClick={act((it) => downloadAction(it))}>
+            <Icon name={offline.has(item()?.url) ? "check" : "download"} />
+            <div class="grow title">{offline.has(item()?.url) ? "Downloaded · remove download" : offline.busy(item()?.url) ? "Downloading…" : "Download"}</div>
+          </button>
+        </Show>
         <Show when={item()?.author?.url}>
           <button class="list-item" onClick={act((it) => { const href = channelHref(it.author!.url); player.minimize(() => navigate(href)); })}>
             <Icon name="user" /> <div class="grow title">Go to {item()?.author?.name || "channel"}</div>
@@ -57,6 +65,49 @@ function CardMenu() {
         <a class="list-item" href={item()?.url} target="_blank" rel="noreferrer" onClick={() => close()}>
           <Icon name="external" /> <div class="grow title">Open original</div>
         </a>
+      </div>
+    </Sheet>
+  );
+}
+
+/** Download, or (already downloaded) offer to remove it. Shared by the card menu and the watch page. */
+export function downloadAction(it: Pick<Content, "url" | "name">) {
+  if (offline.has(it.url)) {
+    toastAction(`"${it.name}" is downloaded`, "Remove", () => offline.remove(it.url).then(() => toast("Download removed", "info", 1800)).catch(toastError));
+    return;
+  }
+  if (offline.busy(it.url)) { toast("Already downloading: see Library → Downloads", "info", 2500); return; }
+  ui.setDownloadFor({ url: it.url, name: it.name });
+}
+
+const [lastQuality, setLastQuality] = stored("gj.download.quality", 720);
+
+function DownloadSheet() {
+  const target = createMemo<Pick<Content, "url" | "name"> | null>((prev) => ui.downloadFor() ?? prev, null);
+  const close = () => ui.setDownloadFor(null);
+  const pick = (height: number) => {
+    const it = ui.downloadFor();
+    close();
+    if (!it) return;
+    setLastQuality(height);
+    toast("Downloading: see Library → Downloads", "info", 2500);
+    offline.download(it, height)
+      .then((saved) => saved && toast(`Downloaded "${saved.name}"`, "info", 3000))
+      .catch((e) => toastError(new Error(`Download failed: ${e?.message ?? e}`)));
+  };
+  return (
+    <Sheet open={!!ui.downloadFor()} onClose={close} title={<span class="card-menu-title">Download {target()?.name}</span>}>
+      <p class="muted" style={{ margin: "0 16px 8px", "font-size": "13px" }}>
+        Your server downloads it, then it's saved on this device so it plays with no connection.
+      </p>
+      <div class="list card-menu">
+        <For each={DOWNLOAD_QUALITIES}>{(o) => (
+          <button class="list-item" onClick={() => pick(o.height)}>
+            <Icon name={o.height === 0 ? "headphones" : "download"} />
+            <div class="grow"><div class="title">{o.label}</div><div class="sub">{o.sub}</div></div>
+            <Show when={lastQuality() === o.height}><Icon name="check" size={18} /></Show>
+          </button>
+        )}</For>
       </div>
     </Sheet>
   );
@@ -243,5 +294,5 @@ export function QueueButton(props: { class?: string }) {
 }
 
 export default function GlobalSheets() {
-  return (<><CardMenu /><QueueSheet /><ContinueBar /></>);
+  return (<><CardMenu /><QueueSheet /><DownloadSheet /><ContinueBar /></>);
 }

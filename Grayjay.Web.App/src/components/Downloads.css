@@ -1,0 +1,15 @@
+.downloads { margin-bottom: 8px; }
+.dl-jobs { display: grid; gap: 8px; margin-bottom: 12px; }
+.dl-job {
+  display: flex; align-items: center; gap: 10px; padding: 10px 12px;
+  border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg-elev);
+}
+.dl-job .grow { flex: 1; min-width: 0; }
+.dl-job.failed .dl-detail { color: var(--danger, #ff6b6b); white-space: normal; }
+.dl-name { font-weight: 600; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dl-detail { font-size: 12px; color: var(--text-2); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dl-bar { height: 4px; border-radius: 2px; background: var(--bg-elev-2); margin-top: 8px; overflow: hidden; }
+.dl-bar > div { height: 100%; background: var(--text-2); border-radius: 2px; transition: width 0.4s ease; }
+.dl-bar > div.device { background: var(--accent); }
+.dl-usage { font-size: 12px; margin-top: 8px; }
+.dl-sub { font-size: 14px; font-weight: 600; margin: 16px 0 8px; color: var(--text-2); }

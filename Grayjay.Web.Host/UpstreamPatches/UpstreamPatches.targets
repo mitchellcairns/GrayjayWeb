@@ -1,0 +1,57 @@
+<Project>
+  <!--
+    [GrayjayWeb] Small fixes to FUTO's submodules (SyncServer, Grayjay.Engine), which we can't commit to. Each patch is an
+    exact find/replace applied to the submodule's working copy before it compiles, in every build (dotnet run, build-web.ps1,
+    Docker). Already applied: nothing to do. Find text gone (FUTO changed or fixed it upstream): a warning, so the patch
+    can be checked and removed.
+  -->
+  <ItemGroup>
+    <UpstreamPatch Include="$(MSBuildThisFileDirectory)../../SyncServer/SyncClient/SyncSocketSession.cs">
+      <Find>$(MSBuildThisFileDirectory)syncserver-direct-pairing.find</Find>
+      <Replace>$(MSBuildThisFileDirectory)syncserver-direct-pairing.replace</Replace>
+    </UpstreamPatch>
+    <UpstreamPatch Include="$(MSBuildThisFileDirectory)../../Grayjay.Engine/Grayjay.Engine/Pagers/DedupContentPager.cs">
+      <Find>$(MSBuildThisFileDirectory)engine-dedup-null-plugin.find</Find>
+      <Replace>$(MSBuildThisFileDirectory)engine-dedup-null-plugin.replace</Replace>
+    </UpstreamPatch>
+  </ItemGroup>
+
+  <UsingTask TaskName="GrayjayApplyUpstreamPatches" TaskFactory="RoslynCodeTaskFactory" AssemblyFile="$(MSBuildToolsPath)\Microsoft.Build.Tasks.Core.dll">
+    <ParameterGroup>
+      <Patches ParameterType="Microsoft.Build.Framework.ITaskItem[]" Required="true" />
+    </ParameterGroup>
+    <Task>
+      <Using Namespace="System.IO" />
+      <Using Namespace="System.Text" />
+      <Code Type="Fragment" Language="cs"><![CDATA[
+        foreach (var patch in Patches)
+        {
+            Func<string, string> fix = x => Path.GetFullPath(x.Replace((char)92, Path.DirectorySeparatorChar).Replace('/', Path.DirectorySeparatorChar));
+            var target = fix(patch.ItemSpec);
+            var findPath = fix(patch.GetMetadata("Find"));
+            var replacePath = fix(patch.GetMetadata("Replace"));
+            var name = Path.GetFileName(findPath);
+            if (!File.Exists(target)) { Log.LogWarning("Upstream patch " + name + ": " + target + " not found"); continue; }
+            var bytes = File.ReadAllBytes(target);
+            bool bom = bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF;
+            var text = new UTF8Encoding(false).GetString(bytes, bom ? 3 : 0, bytes.Length - (bom ? 3 : 0));
+            var eol = text.Contains("\r\n") ? "\r\n" : "\n";
+            Func<string, string> norm = s => s.Replace("\r\n", "\n").TrimEnd('\n').Replace("\n", eol);
+            var find = norm(File.ReadAllText(findPath));
+            var replace = norm(File.ReadAllText(replacePath));
+            if (text.Contains(replace)) continue;
+            if (!text.Contains(find)) { Log.LogWarning("Upstream patch " + name + " no longer matches " + target + " (changed upstream?); check whether it's still needed"); continue; }
+            text = text.Replace(find, replace);
+            var outBytes = new UTF8Encoding(bom).GetPreamble();
+            var body = new UTF8Encoding(false).GetBytes(text);
+            using (var fs = File.Create(target)) { fs.Write(outBytes, 0, outBytes.Length); fs.Write(body, 0, body.Length); }
+            Log.LogMessage(MessageImportance.High, "Applied upstream patch " + name + " to " + target);
+        }
+      ]]></Code>
+    </Task>
+  </UsingTask>
+
+  <Target Name="GrayjayApplyUpstreamPatches" BeforeTargets="ResolveProjectReferences">
+    <GrayjayApplyUpstreamPatches Patches="@(UpstreamPatch)" />
+  </Target>
+</Project>

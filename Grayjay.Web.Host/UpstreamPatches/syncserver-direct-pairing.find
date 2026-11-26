@@ -1,0 +1,3 @@
+                offset += pairingMessageLength;
+                var pairingPlaintext = new byte[512];
+                var (_, _, _) = pairingHandshakeState.ReadMessage(message.AsSpan(offset, pairingMessageLength), pairingPlaintext);
