@@ -1,20 +1,22 @@
 .vp { position: relative; width: 100%; height: 100%; background: #000; overflow: hidden; color: #fff; user-select: none; -webkit-user-select: none; touch-action: manipulation; }
 .vp video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000; }
+.vp video::cue { background: rgb(0 0 0 / 0.72); color: #fff; font-family: var(--font); font-size: 0.95em; line-height: 1.35; }
 .vp-surface { position: absolute; inset: 0; z-index: 1; }
-.vp.fullscreen video { object-fit: contain; }
+.vp:not(.controls-on).fine-pointer { cursor: none; }
 
 .vp-controls {
   position: absolute; inset: 0; z-index: 2; display: flex; flex-direction: column; pointer-events: none;
-  background: linear-gradient(to bottom, rgb(0 0 0 / 0.55), transparent 28%, transparent 62%, rgb(0 0 0 / 0.7));
+  background: linear-gradient(to bottom, rgb(0 0 0 / 0.55), transparent 26%, transparent 58%, rgb(0 0 0 / 0.75));
   opacity: 0; transition: opacity 0.2s;
 }
 .vp.controls-on .vp-controls { opacity: 1; }
-.vp.controls-on .vp-controls button, .vp.controls-on .vp-controls .vp-bar { pointer-events: auto; }
+.vp.controls-on .vp-controls :is(button, input, .vp-bar, .vp-menu) { pointer-events: auto; }
 .vp-controls .icon-btn { color: #fff; }
-.vp-controls .icon-btn:hover { background: rgb(255 255 255 / 0.12); }
+.vp-controls .icon-btn:hover { background: rgb(255 255 255 / 0.14); }
 
-.vp-top { display: flex; align-items: center; padding: max(6px, var(--safe-top)) 6px 0; }
-.vp:not(.fullscreen) .vp-top { padding-top: 6px; }
+.vp-top { display: flex; align-items: center; gap: 4px; padding: 6px 6px 0; }
+.vp.fullscreen .vp-top { padding-top: max(6px, var(--safe-top)); }
+.vp-title { flex: 1; min-width: 0; font-weight: 650; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-shadow: 0 1px 2px rgb(0 0 0 / 0.6); }
 .vp-middle { flex: 1; display: flex; align-items: center; justify-content: center; gap: 40px; }
 .vp-play {
   width: 68px; height: 68px; border-radius: 50%; border: 0; display: grid; place-items: center; cursor: pointer;
@@ -24,21 +26,72 @@
 .vp-skip { width: 52px; height: 52px; }
 .vp-skip svg { width: 28px; height: 28px; }
 @media (pointer: coarse) { .vp-skip { display: none; } }
+/* With a mouse the big centre button is redundant: play/pause lives in the bar and clicking the video toggles. */
+.vp.fine-pointer .vp-middle .vp-play { display: none; }
+.vp.fine-pointer .vp-middle .vp-skip { display: none; }
 
-.vp-bottom { padding: 0 12px calc(4px + (var(--safe-bottom) * var(--fs, 0))); }
+.vp-bottom { padding: 0 10px calc(2px + var(--safe-bottom) * var(--fs, 0)); }
 .vp.fullscreen { --fs: 1; }
-.vp-time { display: flex; align-items: center; gap: 2px; font-size: 13px; font-variant-numeric: tabular-nums; font-weight: 600; text-shadow: 0 1px 2px rgb(0 0 0 / 0.5); }
-.vp-pill {
-  border: 0; background: rgb(255 255 255 / 0.16); color: #fff; border-radius: 999px; padding: 4px 10px; font-size: 12px; font-weight: 700; cursor: pointer;
+.vp.fullscreen .vp-bottom { padding-left: max(10px, var(--safe-left)); padding-right: max(10px, var(--safe-right)); }
+
+/* ---------- Seek bar ---------- */
+.vp-bar { position: relative; height: 24px; display: flex; align-items: center; cursor: pointer; touch-action: none; outline: none; }
+.vp-bar-track { position: relative; width: 100%; height: 4px; border-radius: 2px; background: rgb(255 255 255 / 0.26); overflow: hidden; transition: height 0.12s; }
+.vp-bar:hover .vp-bar-track, .vp-bar.scrubbing .vp-bar-track, .vp-bar:focus-visible .vp-bar-track { height: 6px; }
+.vp-bar-buffer { position: absolute; inset: 0 auto 0 0; background: rgb(255 255 255 / 0.38); }
+.vp-bar-fill { position: absolute; inset: 0 auto 0 0; background: var(--accent); }
+.vp-bar-thumb {
+  position: absolute; top: 50%; width: 14px; height: 14px; margin: -7px 0 0 -7px; border-radius: 50%; background: var(--accent);
+  box-shadow: 0 0 0 2px rgb(0 0 0 / 0.25); transform: scale(0); transition: transform 0.12s; pointer-events: none;
+}
+.vp-bar:hover .vp-bar-thumb, .vp-bar.scrubbing .vp-bar-thumb, .vp-bar:focus-visible .vp-bar-thumb { transform: scale(1); }
+.vp-bar.scrubbing .vp-bar-thumb { transform: scale(1.25); }
+@media (pointer: coarse) { .vp-bar-thumb { transform: scale(0.9); } }
+.vp-bar-tip {
+  position: absolute; bottom: 24px; transform: translateX(-50%); padding: 3px 8px; border-radius: 6px; pointer-events: none;
+  background: rgb(0 0 0 / 0.8); font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap;
 }
 
-.vp-bar { position: relative; height: 26px; display: flex; align-items: center; cursor: pointer; touch-action: none; }
-.vp-bar-track { position: relative; width: 100%; height: 3px; border-radius: 2px; background: rgb(255 255 255 / 0.28); overflow: hidden; transition: height 0.12s; }
-.vp-bar:hover .vp-bar-track, .vp-bar.scrubbing .vp-bar-track { height: 5px; }
-.vp-bar-buffer { position: absolute; inset: 0 auto 0 0; background: rgb(255 255 255 / 0.4); }
-.vp-bar-fill { position: absolute; inset: 0 auto 0 0; background: var(--accent); }
-.vp-bar-thumb { position: absolute; top: 50%; width: 14px; height: 14px; margin: -7px 0 0 -7px; border-radius: 50%; background: var(--accent); transform: scale(0.85); transition: transform 0.12s; }
-.vp-bar.scrubbing .vp-bar-thumb { transform: scale(1.3); }
+/* ---------- Button row ---------- */
+.vp-row { display: flex; align-items: center; gap: 2px; min-height: 44px; }
+.vp-row .icon-btn { width: 40px; height: 40px; }
+.vp-time { font-size: 13px; font-variant-numeric: tabular-nums; font-weight: 600; text-shadow: 0 1px 2px rgb(0 0 0 / 0.5); padding: 0 6px; white-space: nowrap; }
+.vp-time .faint { color: rgb(255 255 255 / 0.65); }
+.vp-btn {
+  display: inline-flex; align-items: center; gap: 5px; height: 36px; padding: 0 9px; border: 0; border-radius: 999px;
+  background: transparent; color: #fff; cursor: pointer; font-size: 13px; font-weight: 650; white-space: nowrap;
+}
+.vp-btn svg { width: 20px; height: 20px; }
+.vp-btn:hover, .vp-btn[aria-expanded="true"] { background: rgb(255 255 255 / 0.16); }
+.vp-btn.on { color: var(--accent); }
+.vp-btn.on::after { content: ""; position: absolute; }
+.vp-btn-label.strong { font-weight: 750; }
+@media (max-width: 420px) { .vp-btn .vp-btn-label:not(.strong) { display: none; } .vp-btn { padding: 0 7px; } }
+
+.vp-only-fine { display: none !important; }
+.vp.fine-pointer .vp-only-fine { display: inline-flex !important; }
+.vp-volume { align-items: center; }
+.vp-volume input { width: 0; opacity: 0; transition: width 0.15s, opacity 0.15s; accent-color: #fff; }
+.vp-volume:hover input, .vp-volume:focus-within input { width: 80px; opacity: 1; margin-right: 6px; }
+
+/* ---------- In-player menus (work in fullscreen too) ---------- */
+.vp-menu {
+  position: absolute; right: 10px; bottom: 76px; z-index: 4; width: min(280px, calc(100% - 20px)); max-height: calc(100% - 96px);
+  display: flex; flex-direction: column; border-radius: var(--radius); overflow: hidden;
+  background: rgb(22 22 26 / 0.94); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); box-shadow: 0 10px 40px rgb(0 0 0 / 0.5);
+  animation: vp-menu-in 0.14s var(--ease);
+}
+@keyframes vp-menu-in { from { opacity: 0; transform: translateY(6px); } }
+.vp-menu-title { padding: 12px 16px 6px; font-size: 13px; font-weight: 700; color: rgb(255 255 255 / 0.6); text-transform: uppercase; letter-spacing: 0.04em; }
+.vp-menu-list { overflow-y: auto; padding-bottom: 6px; overscroll-behavior: contain; }
+.vp-menu-item {
+  display: flex; align-items: center; gap: 8px; width: 100%; min-height: 42px; padding: 6px 14px 6px 10px; border: 0; background: none;
+  color: #fff; font-size: 14px; text-align: left; cursor: pointer;
+}
+.vp-menu-item:hover, .vp-menu-item:focus-visible { background: rgb(255 255 255 / 0.1); }
+.vp-check { width: 22px; display: grid; place-items: center; color: var(--accent); flex: none; }
+.vp-menu-label { display: flex; flex-direction: column; min-width: 0; }
+.vp-menu-label small { color: rgb(255 255 255 / 0.55); font-size: 12px; }
 
 .vp-center { position: absolute; inset: 0; display: grid; place-items: center; z-index: 1; pointer-events: none; }
 .vp-spinner { border-color: rgb(255 255 255 / 0.25); border-top-color: #fff; width: 42px; height: 42px; }
@@ -54,6 +107,19 @@
 .vp-seek-hint.right { right: 10%; }
 @keyframes hint { from { opacity: 0; transform: translateY(-50%) scale(0.9); } 20% { opacity: 1; transform: translateY(-50%) scale(1); } }
 
-.vp.mini .vp-controls, .vp.mini .vp-seek-hint { display: none; }
-.vp.mini .vp-error p { display: none; }
-.vp.mini .vp-error .btn { display: none; }
+.vp.mini .vp-controls, .vp.mini .vp-seek-hint, .vp.mini .vp-surface { display: none; }
+.vp.mini .vp-error p, .vp.mini .vp-error .btn { display: none; }
+
+/* ---------- Chapters & SponsorBlock ---------- */
+.vp-bar-segment { position: absolute; top: 0; bottom: 0; opacity: 0.9; }
+.vp-bar-tick { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: rgb(0 0 0 / 0.6); }
+.vp-bar-tip { display: flex; flex-direction: column; align-items: center; gap: 1px; }
+.vp-bar-tip-chapter { font-weight: 600; font-size: 11px; max-width: 220px; overflow: hidden; text-overflow: ellipsis; color: rgb(255 255 255 / 0.85); }
+.vp-skip-segment {
+  position: absolute; right: 14px; bottom: 96px; z-index: 3; display: inline-flex; align-items: center; gap: 6px;
+  padding: 9px 14px; border-radius: 999px; border: 1px solid rgb(255 255 255 / 0.25); cursor: pointer;
+  background: rgb(0 0 0 / 0.7); color: #fff; font-weight: 700; font-size: 14px; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+  animation: vp-menu-in 0.2s var(--ease);
+}
+.vp-skip-segment:hover { background: rgb(0 0 0 / 0.85); }
+.vp.fullscreen .vp-skip-segment { bottom: calc(110px + var(--safe-bottom)); right: max(14px, var(--safe-right)); }

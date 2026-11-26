@@ -1,4 +1,4 @@
-import { For, Show, createEffect, createResource, createSignal, on, onCleanup } from "solid-js";
+import { For, Show, createEffect, createResource, createSignal, on, onCleanup, onMount } from "solid-js";
 import { useNavigate } from "@solidjs/router";
 import { ContentType, details, subscriptions } from "../api";
 import { bestThumbnail, formatAgo, formatCount, formatViews, joinDot } from "../lib/format";
@@ -11,7 +11,7 @@ import Sheet from "../components/Sheet";
 import { toast, toastError } from "../components/Toasts";
 import VideoPlayer from "./VideoPlayer";
 import { suppressNextTap } from "./gesture";
-import { player } from "./store";
+import { MiniRect, player, prefs, registerPlayerBox } from "./store";
 import "./WatchOverlay.css";
 
 export default function WatchOverlay() {
@@ -25,8 +25,87 @@ export default function WatchOverlay() {
   // Lock page scroll behind the full-screen watch view.
   createEffect(() => {
     document.documentElement.style.overflow = mode() === "full" ? "hidden" : "";
-    document.documentElement.style.setProperty("--mini-h", mode() === "mini" ? "72px" : "0px");
   });
+
+  // ---------- Floating mini-player: drag anywhere, resize from the corner, geometry remembered ----------
+  const [viewport, setViewport] = createSignal({ w: innerWidth, h: innerHeight });
+  const onResize = () => setViewport({ w: innerWidth, h: innerHeight });
+  addEventListener("resize", onResize);
+  onCleanup(() => removeEventListener("resize", onResize));
+  const [live, setLive] = createSignal<MiniRect | null>(null); // while dragging/resizing (not persisted yet)
+  const [miniControls, setMiniControls] = createSignal(false);
+  const insets = () => {
+    const cs = getComputedStyle(document.documentElement);
+    const px = (v: string) => parseFloat(cs.getPropertyValue(v)) || 0;
+    return { top: px("--safe-top") + 8, bottom: px("--tabbar-h") + px("--safe-bottom") + 8, left: px("--rail-w") + px("--safe-left") + 8, right: px("--safe-right") + 8 };
+  };
+  const clampRect = (r: MiniRect): MiniRect => {
+    const vp = viewport(), ins = insets();
+    const maxW = Math.max(180, Math.min(960, vp.w - ins.left - ins.right));
+    const w = Math.max(180, Math.min(maxW, r.w));
+    const h = w * 9 / 16;
+    const x = Math.max(ins.left, Math.min(vp.w - ins.right - w, r.x));
+    const y = Math.max(ins.top, Math.min(vp.h - ins.bottom - h, r.y));
+    return { x, y, w };
+  };
+  const defaultRect = (): MiniRect => {
+    const vp = viewport(), ins = insets();
+    const w = vp.w < 600 ? Math.min(vp.w * 0.62, 300) : 420;
+    return { x: vp.w - ins.right - w, y: vp.h - ins.bottom - w * 9 / 16, w };
+  };
+  const miniRect = () => clampRect(live() ?? prefs.mini() ?? defaultRect());
+  const miniStyle = () => {
+    if (mode() !== "mini") return {};
+    const r = miniRect();
+    return { left: `${r.x}px`, top: `${r.y}px`, width: `${r.w}px`, height: `${r.w * 9 / 16}px` };
+  };
+
+  let gesture: { kind: "drag" | "resize"; startX: number; startY: number; start: MiniRect; moved: boolean; anchorRight: boolean } | null = null;
+  let lastMiniTap = 0, hideMini: number | undefined;
+  const showMiniControls = () => { setMiniControls(true); clearTimeout(hideMini); hideMini = window.setTimeout(() => setMiniControls(false), 2800); };
+  const onMiniDown = (kind: "drag" | "resize") => (e: PointerEvent) => {
+    if (e.button !== 0) return;
+    e.stopPropagation();
+    try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); } catch { }
+    const start = miniRect();
+    gesture = { kind, startX: e.clientX, startY: e.clientY, start, moved: false, anchorRight: start.x + start.w / 2 > viewport().w / 2 };
+  };
+  const onMiniMove = (e: PointerEvent) => {
+    if (!gesture) return;
+    const dx = e.clientX - gesture.startX, dy = e.clientY - gesture.startY;
+    if (!gesture.moved && Math.hypot(dx, dy) < 6) return;
+    gesture.moved = true;
+    const s = gesture.start;
+    if (gesture.kind === "drag") {
+      setLive({ x: s.x + dx, y: s.y + dy, w: s.w });
+    } else {
+      // Resize from the inner top corner, keeping the opposite (outer bottom) corner fixed.
+      const w = gesture.anchorRight ? s.w - dx : s.w + dx;
+      const clamped = clampRect({ x: s.x, y: s.y, w });
+      const h = clamped.w * 9 / 16, bottom = s.y + s.w * 9 / 16;
+      setLive({ x: gesture.anchorRight ? s.x + s.w - clamped.w : s.x, y: bottom - h, w: clamped.w });
+    }
+  };
+  const onMiniUp = () => {
+    const g = gesture;
+    gesture = null;
+    if (!g) return;
+    if (g.moved) {
+      prefs.setMini(miniRect());
+      setLive(null);
+      return;
+    }
+    if (g.kind === "resize") return;
+    const now = performance.now();
+    if (now - lastMiniTap < 300) { lastMiniTap = 0; player.expand(); return; }
+    lastMiniTap = now;
+    if (miniControls()) setMiniControls(false); else showMiniControls();
+  };
+
+  // Morph between full and mini (FLIP on the player box).
+  let playerBoxEl!: HTMLDivElement;
+  onMount(() => registerPlayerBox(playerBoxEl));
+  onCleanup(() => registerPlayerBox(null));
 
   // Recommendations for the current video.
   const recs = createPager(
@@ -97,12 +176,11 @@ export default function WatchOverlay() {
     return "";
   };
 
-  onCleanup(() => document.documentElement.style.removeProperty("--mini-h"));
 
   return (
-    <div class="watch" data-mode={mode()} aria-hidden={mode() === "closed"}>
+    <div class="watch" data-mode={mode()} aria-hidden={mode() === "closed"} style={miniStyle()} classList={{ dragging: !!live() }}>
       <div class="watch-panel" ref={panel}>
-        <div class="watch-player" onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd}>
+        <div class="watch-player" ref={playerBoxEl} onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd}>
           <VideoPlayer
             source={player.source()}
             video={v()}
@@ -115,16 +193,24 @@ export default function WatchOverlay() {
           />
         </div>
 
-        {/* Mini player bar */}
+        {/* Floating mini-player: drag to move, corner handle to resize, tap for controls, double-tap to expand */}
         <Show when={mode() === "mini"}>
-          <div class="mini-info" onClick={() => player.expand()}>
-            <div class="mini-title">{meta()?.name}</div>
-            <div class="mini-sub">{meta()?.author?.name}</div>
+          <div class="mini-surface" classList={{ on: miniControls() }}
+            onPointerDown={onMiniDown("drag")} onPointerMove={onMiniMove} onPointerUp={onMiniUp} onPointerCancel={onMiniUp}
+            onMouseEnter={() => setMiniControls(true)} onMouseLeave={() => { if (!gesture) setMiniControls(false); }}>
+            <div class="mini-controls">
+              <button class="mini-btn" aria-label="Expand player" title="Expand" onPointerDown={(e) => e.stopPropagation()} onClick={() => player.expand()}><Icon name="up" /></button>
+              <div class="spacer" />
+              <button class="mini-btn" aria-label="Close player" title="Close" onPointerDown={(e) => e.stopPropagation()} onClick={() => player.close()}><Icon name="close" /></button>
+            </div>
+            <button class="mini-play" aria-label={player.playing() ? "Pause" : "Play"} onPointerDown={(e) => e.stopPropagation()}
+              onClick={() => { const el = player.videoEl(); el && (el.paused ? el.play() : el.pause()); showMiniControls(); }}>
+              <Icon name={player.playing() ? "pause" : "play"} filled size={28} />
+            </button>
+            <div class="mini-title-bar">{meta()?.name}</div>
           </div>
-          <button class="icon-btn" aria-label="Play or pause" onClick={(e) => { e.stopPropagation(); const el = player.videoEl(); el && (el.paused ? el.play() : el.pause()); }}>
-            <Icon name={player.playing() ? "pause" : "play"} filled />
-          </button>
-          <button class="icon-btn" aria-label="Close player" onClick={(e) => { e.stopPropagation(); player.close(); }}><Icon name="close" /></button>
+          <div class={`mini-resize ${miniRect().x + miniRect().w / 2 > viewport().w / 2 ? "left" : "right"}`} aria-label="Resize player"
+            onPointerDown={onMiniDown("resize")} onPointerMove={onMiniMove} onPointerUp={onMiniUp} onPointerCancel={onMiniUp} />
         </Show>
 
         <Show when={mode() === "full"}>

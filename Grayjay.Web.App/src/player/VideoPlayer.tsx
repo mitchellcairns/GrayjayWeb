@@ -1,11 +1,11 @@
-import { For, Show, createEffect, createMemo, createSignal, on, onCleanup, onMount } from "solid-js";
+import { For, JSX, Show, createEffect, createMemo, createResource, createSignal, on, onCleanup, onMount } from "solid-js";
 import type { SourceDescriptor, VideoDetails } from "../api";
 import { details as detailsApi } from "../api";
 import { bestThumbnail, formatDuration } from "../lib/format";
 import Icon from "../components/Icon";
-import Sheet from "../components/Sheet";
-import { player } from "./store";
+import { player, prefs } from "./store";
 import { consumeSuppressedTap } from "./gesture";
+import { toast } from "../components/Toasts";
 import "./VideoPlayer.css";
 
 // Shaka (~900 KB) is only fetched the first time something plays.
@@ -21,9 +21,47 @@ function loadShaka() {
 
 const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
 const canElementFullscreen = !!(document.fullscreenEnabled || (document as any).webkitFullscreenEnabled) && !/iPhone|iPod/.test(navigator.userAgent);
+const finePointer = matchMedia("(pointer: fine)").matches;
+const SPEEDS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 3];
 
 function isStreamType(type?: string) {
   return !!type && (type.includes("dash") || type.includes("mpegurl") || type.includes("m3u8"));
+}
+
+const languageNames = (() => { try { return new Intl.DisplayNames(undefined, { type: "language" }); } catch { return null; } })();
+function languageName(code?: string) {
+  if (!code || code === "Unknown") return "";
+  try { return languageNames?.of(code) ?? code; } catch { return code; }
+}
+function codecName(codec?: string, container?: string) {
+  const c = (codec ?? "").toLowerCase();
+  if (c.startsWith("mp4a")) return "AAC";
+  if (c.includes("opus")) return "Opus";
+  if (c.includes("ac-3") || c.includes("ac3")) return "Dolby";
+  if (c.includes("ec-3")) return "Dolby+";
+  return codec || container || "Audio";
+}
+
+type Menu = "captions" | "audio" | "speed" | "quality" | null;
+
+/** Grayjay chapter types: 0 normal, 5 skippable (offer a button), 6 skip (always), 7 skip once. SponsorBlock uses 5–7. */
+interface Chapter { name: string; type: number; timeStart: number; timeEnd: number }
+const SEGMENT_COLORS: Record<string, string> = {
+  sponsor: "#00d400", selfpromo: "#ffff00", "self-promo": "#ffff00", "self promotion": "#ffff00", intro: "#00ffff", intermission: "#00ffff",
+  outro: "#0202ed", endcards: "#0202ed", interaction: "#cc00ff", preview: "#008fd6", recap: "#008fd6", "music": "#ff9900", offtopic: "#ff9900", filler: "#7300ff",
+};
+const SEGMENT_NAMES: Record<string, string> = {
+  sponsor: "sponsor", selfpromo: "self-promotion", intro: "intro", outro: "outro", interaction: "reminder", preview: "preview",
+  music_offtopic: "non-music section", filler: "filler", poi_highlight: "highlight", exclusive_access: "exclusive access",
+};
+export function segmentName(name: string) {
+  const n = (name ?? "").toLowerCase().trim();
+  return SEGMENT_NAMES[n] ?? (n || "segment");
+}
+function segmentColor(name: string) {
+  const n = name.toLowerCase();
+  const key = Object.keys(SEGMENT_COLORS).find((k) => n.includes(k));
+  return key ? SEGMENT_COLORS[key] : "#00d400";
 }
 
 export default function VideoPlayer(props: {
@@ -38,6 +76,7 @@ export default function VideoPlayer(props: {
 }) {
   let container!: HTMLDivElement;
   let el!: HTMLVideoElement;
+  let bar!: HTMLDivElement;
   let shakaPlayer: any = null;
 
   const [playing, setPlaying] = createSignal(false);
@@ -49,12 +88,22 @@ export default function VideoPlayer(props: {
   const [needsTap, setNeedsTap] = createSignal(false);
   const [playError, setPlayError] = createSignal<string | null>(null);
   const [scrub, setScrub] = createSignal<number | null>(null);
+  // After releasing the seek bar, hold the playhead at the target until the seek lands (no snapping back).
+  const [seekTarget, setSeekTarget] = createSignal<number | null>(null);
+  const [hover, setHover] = createSignal<{ x: number; t: number } | null>(null);
   const [fullscreen, setFullscreen] = createSignal(false);
-  const [settingsOpen, setSettingsOpen] = createSignal(false);
-  const [rate, setRate] = createSignal(1);
+  const [menu, setMenu] = createSignal<Menu>(null);
+  const [rate, setRate] = createSignal(prefs.rate());
+  const [volume, setVolume] = createSignal(prefs.volume());
+  const [muted, setMuted] = createSignal(prefs.muted());
   const [seekHint, setSeekHint] = createSignal<{ side: "left" | "right"; n: number } | null>(null);
 
-  onMount(() => player.setVideoEl(el));
+  onMount(() => {
+    // Volume and mute are remembered between videos and sessions.
+    el.volume = Math.max(0, Math.min(1, prefs.volume()));
+    el.muted = prefs.muted();
+    player.setVideoEl(el);
+  });
   onCleanup(() => { player.setVideoEl(null); shakaPlayer?.destroy(); });
 
   // ---------- Loading sources ----------
@@ -79,8 +128,10 @@ export default function VideoPlayer(props: {
   createEffect(on(() => props.source, async (src) => {
     setPlayError(null);
     setNeedsTap(false);
+    setSeekTarget(null);
     if (!src) return;
     const start = props.startAt || 0;
+    const wasPaused = el.currentTime > 0 && el.paused && !el.ended;
     try {
       if (isStreamType(src.type)) {
         const nativeHls = src.type.includes("mpegurl") && el.canPlayType("application/vnd.apple.mpegurl") && isIOS;
@@ -98,6 +149,11 @@ export default function VideoPlayer(props: {
           if ((window as any).ManagedMediaSource && !(window as any).MediaSource) el.disableRemotePlayback = true;
           const p = await ensureShaka();
           await p.load(src.url, start, src.type);
+          // Captions arrive as a text track inside the server's DASH manifest.
+          const hasCaptions = (src.subtitleIndex ?? -1) >= 0;
+          const tracks = p.getTextTracks?.() ?? [];
+          if (hasCaptions && tracks.length) p.selectTextTrack(tracks[0]);
+          p.setTextTrackVisibility?.(hasCaptions);
         }
       } else {
         await shakaPlayer?.unload();
@@ -105,7 +161,7 @@ export default function VideoPlayer(props: {
         el.addEventListener("loadedmetadata", () => { if (start) el.currentTime = start; }, { once: true });
       }
       el.playbackRate = rate();
-      await play();
+      if (!wasPaused) await play();
     } catch (e: any) {
       console.error("load", e);
       setPlayError(e?.message ? `Couldn't start playback: ${e.message}` : `Couldn't start playback (${e?.code ?? "error"})`);
@@ -122,7 +178,18 @@ export default function VideoPlayer(props: {
   }
   const toggle = () => (el.paused ? play() : el.pause());
 
-  // ---------- Element events ----------
+  // ---------- Smooth time (rAF while playing; timeupdate only fires ~4×/s) ----------
+  let raf = 0;
+  const tick = () => {
+    setTime(el.currentTime);
+    raf = requestAnimationFrame(tick);
+  };
+  createEffect(on(playing, (p) => {
+    cancelAnimationFrame(raf);
+    if (p) raf = requestAnimationFrame(tick);
+  }));
+  onCleanup(() => cancelAnimationFrame(raf));
+
   const updateBuffered = () => {
     const b = el.buffered;
     for (let i = 0; i < b.length; i++) if (b.start(i) <= el.currentTime + 0.5 && b.end(i) >= el.currentTime) { setBuffered(b.end(i)); return; }
@@ -133,15 +200,16 @@ export default function VideoPlayer(props: {
   const poke = () => {
     setControls(true);
     clearTimeout(hideTimer);
-    if (!el.paused) hideTimer = window.setTimeout(() => { if (!settingsOpen() && scrub() == null) setControls(false); }, 3000);
+    if (!el.paused) hideTimer = window.setTimeout(() => { if (!menu() && scrub() == null) setControls(false); }, 3000);
   };
   createEffect(on(playing, (p) => { if (p) poke(); else { clearTimeout(hideTimer); setControls(true); } }));
+  createEffect(on(menu, (m) => { if (!m) poke(); }));
 
   // ---------- Tap / double-tap ----------
   let lastTap = 0, lastSide: "left" | "right" | "center" = "center", singleTapTimer: number | undefined, hintTimer: number | undefined;
   const onSurfaceTap = (e: PointerEvent) => {
     if (consumeSuppressedTap()) return;
-    if (props.mini) { player.expand(); return; }
+    if (menu()) { setMenu(null); return; }
     if (e.pointerType === "mouse") { toggle(); poke(); return; }
     const rect = container.getBoundingClientRect();
     const x = (e.clientX - rect.left) / rect.width;
@@ -161,21 +229,72 @@ export default function VideoPlayer(props: {
     clearTimeout(singleTapTimer);
     singleTapTimer = window.setTimeout(() => { if (controls()) setControls(false); else poke(); }, side === "center" ? 0 : 260);
   };
-  const seekBy = (d: number) => { el.currentTime = Math.max(0, Math.min((el.duration || Infinity) - 0.5, el.currentTime + d)); poke(); };
-
-  // ---------- Scrubbing ----------
-  let bar!: HTMLDivElement;
-  const posFromEvent = (e: PointerEvent) => {
-    const r = bar.getBoundingClientRect();
-    return Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * (duration() || 0);
+  const seekTo = (t: number) => {
+    const d = el.duration || duration() || 0;
+    const target = Math.max(0, Math.min(d > 0 ? d - 0.25 : t, t));
+    setSeekTarget(target);
+    el.currentTime = target;
+    setTime(target);
   };
-  const onBarDown = (e: PointerEvent) => { e.stopPropagation(); bar.setPointerCapture(e.pointerId); setScrub(posFromEvent(e)); poke(); };
-  const onBarMove = (e: PointerEvent) => { if (scrub() != null) setScrub(posFromEvent(e)); };
+  const seekBy = (d: number) => { seekTo((seekTarget() ?? el.currentTime) + d); poke(); };
+
+  // ---------- Chapters & SponsorBlock segments ----------
+  const [chapters] = createResource(() => (props.video ? player.url() : null), async (u) => {
+    try {
+      const list = await detailsApi.chapters(u!);
+      return (list ?? []).map((c: any) => ({ name: c.name ?? "", type: Number(c.type) || 0, timeStart: Number(c.timeStart) || 0, timeEnd: Number(c.timeEnd) || 0 }))
+        .filter((c: Chapter) => c.timeEnd > c.timeStart) as Chapter[];
+    } catch { return [] as Chapter[]; }
+  });
+  const segments = () => (chapters() ?? []).filter((c) => c.type >= 5);
+  const skippedOnce = new Set<string>();
+  createEffect(on(() => player.url(), () => skippedOnce.clear()));
+  const activeSegment = createMemo(() => {
+    const t = time();
+    return segments().find((c) => t >= c.timeStart && t < c.timeEnd - 0.3) ?? null;
+  });
+  createEffect(on(activeSegment, (seg) => {
+    if (!seg || scrub() != null) return;
+    const key = `${seg.timeStart}-${seg.name}`;
+    if (seg.type === 6 || (seg.type === 7 && !skippedOnce.has(key))) {
+      skippedOnce.add(key);
+      seekTo(seg.timeEnd);
+      toast(`Skipped ${segmentName(seg.name)}`);
+    }
+  }));
+  const chapterAt = (t: number) => (chapters() ?? []).find((c) => c.type === 0 && t >= c.timeStart && t < c.timeEnd)?.name;
+
+  // ---------- Seek bar ----------
+  const posFromX = (clientX: number) => {
+    const r = bar.getBoundingClientRect();
+    return Math.max(0, Math.min(1, (clientX - r.left) / r.width)) * (duration() || 0);
+  };
+  const onBarDown = (e: PointerEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    try { bar.setPointerCapture(e.pointerId); } catch { }
+    setScrub(posFromX(e.clientX));
+    setMenu(null);
+    poke();
+  };
+  const onBarMove = (e: PointerEvent) => {
+    const t = posFromX(e.clientX);
+    if (scrub() != null) { setScrub(t); poke(); }
+    if (e.pointerType === "mouse" || scrub() != null) {
+      const r = bar.getBoundingClientRect();
+      setHover({ x: Math.max(24, Math.min(r.width - 24, e.clientX - r.left)), t });
+    }
+  };
   const onBarUp = (e: PointerEvent) => {
     if (scrub() == null) return;
-    el.currentTime = posFromEvent(e);
+    seekTo(posFromX(e.clientX));
     setScrub(null);
+    if (e.pointerType !== "mouse") setHover(null);
     poke();
+  };
+  const onBarKey = (e: KeyboardEvent) => {
+    if (e.key === "ArrowLeft") { e.preventDefault(); seekBy(-5); }
+    if (e.key === "ArrowRight") { e.preventDefault(); seekBy(5); }
   };
 
   // ---------- Fullscreen / PiP ----------
@@ -228,7 +347,7 @@ export default function VideoPlayer(props: {
     set("pause", () => el.pause());
     set("seekbackward", (d) => seekBy(-(d.seekOffset ?? 10)));
     set("seekforward", (d) => seekBy(d.seekOffset ?? 10));
-    set("seekto", (d) => { if (d.seekTime != null) el.currentTime = d.seekTime; });
+    set("seekto", (d) => { if (d.seekTime != null) seekTo(d.seekTime); });
     set("stop", () => player.close());
   });
   const updatePositionState = () => {
@@ -278,13 +397,21 @@ export default function VideoPlayer(props: {
       case "ArrowRight": case "l": e.preventDefault(); seekBy(e.key === "l" ? 10 : 5); break;
       case "f": e.preventDefault(); toggleFullscreen(); break;
       case "m": el.muted = !el.muted; poke(); break;
+      case "c": toggleCaptions(); break;
       case "i": togglePip(); break;
+      case ">": setSpeed(SPEEDS[Math.min(SPEEDS.length - 1, SPEEDS.indexOf(rate()) + 1)] ?? 1); break;
+      case "<": setSpeed(SPEEDS[Math.max(0, SPEEDS.indexOf(rate()) - 1)] ?? 1); break;
+      case "Escape": if (menu()) setMenu(null); break;
     }
   };
   addEventListener("keydown", onKey);
   onCleanup(() => removeEventListener("keydown", onKey));
 
-  // ---------- Quality ----------
+  // ---------- Tracks: quality, audio, captions, speed ----------
+  const currentVideoIndex = () => props.source?.videoIndex ?? -1;
+  const currentAudioIndex = () => props.source?.audioIndex ?? -1;
+  const currentSubtitleIndex = () => props.source?.subtitleIndex ?? -1;
+
   const qualities = createMemo(() => {
     const sources = (props.video?.video?.videoSources ?? []).map((s: any, i: number) => ({ ...s, index: i }));
     const seen = new Set<string>();
@@ -293,21 +420,77 @@ export default function VideoPlayer(props: {
       .sort((a: any, b: any) => (b.height ?? 0) - (a.height ?? 0) || (a.container?.includes("mp4") ? -1 : 1))
       .filter((s: any) => { const k = `${s.height}-${s.fps ?? ""}`; if (seen.has(k)) return false; seen.add(k); return true; });
   });
-  const currentQuality = createMemo(() => {
-    const vi = props.source?.videoIndex;
-    const s: any = vi != null && vi >= 0 ? props.video?.video?.videoSources?.[vi] : null;
-    return s?.height ? `${s.height}p` : "Auto";
+  const qualityLabel = (s: any) => (s?.height ? `${s.height}p${s.fps && s.fps > 30 ? s.fps : ""}` : s?.name ?? "Auto");
+  const currentQuality = () => {
+    const vi = currentVideoIndex();
+    return vi >= 0 ? qualityLabel(props.video?.video?.videoSources?.[vi]) : "Auto";
+  };
+
+  const audioTracks = createMemo(() => {
+    const list = (props.video?.video?.audioSources ?? []).map((s: any, i: number) => ({ ...s, index: i }));
+    const multiLanguage = new Set(list.map((s: any) => s.language).filter((l: string) => l && l !== "Unknown")).size > 1;
+    return list
+      .map((s: any) => ({
+        index: s.index,
+        label: multiLanguage
+          ? `${languageName(s.language) || s.name}${s.original ? " (original)" : ""}`
+          : `${codecName(s.codec, s.container)}${s.bitrate ? ` · ${Math.round(s.bitrate / 1000)} kbps` : ""}`,
+        sub: multiLanguage ? `${codecName(s.codec, s.container)}${s.bitrate ? ` · ${Math.round(s.bitrate / 1000)} kbps` : ""}` : "",
+        bitrate: s.bitrate ?? 0,
+        language: s.language,
+      }))
+      .sort((a: any, b: any) => (a.language ?? "").localeCompare(b.language ?? "") || b.bitrate - a.bitrate);
   });
 
-  const shownTime = () => scrub() ?? time();
-  const pct = (t: number) => (duration() > 0 ? `${(t / duration()) * 100}%` : "0%");
+  const captionTracks = createMemo(() => (props.video?.subtitles ?? []).map((s: any, i: number) => ({
+    index: i,
+    label: s.name || languageName(s.language) || `Track ${i + 1}`,
+    language: s.language as string | undefined,
+    // Every YouTube caption URL carries caps=asr, so only the track name tells auto-generated ones apart.
+    auto: /auto-generated|\(auto\)/i.test(s.name ?? ""),
+  })));
+
+  const selectQuality = (vi: number) => { setMenu(null); player.selectSource(vi, currentAudioIndex(), currentSubtitleIndex()); };
+  const selectAudio = (ai: number) => { setMenu(null); player.selectSource(currentVideoIndex(), ai, currentSubtitleIndex()); };
+  const selectCaptions = (si: number) => {
+    setMenu(null);
+    const track = captionTracks().find((t) => t.index === si);
+    prefs.setCaptions(track?.language ?? (si >= 0 ? "on" : "off"));
+    player.selectSource(currentVideoIndex(), currentAudioIndex(), si);
+  };
+  const toggleCaptions = () => {
+    if (currentSubtitleIndex() >= 0) selectCaptions(-1);
+    else if (captionTracks().length) {
+      const pref = prefs.captions();
+      selectCaptions((captionTracks().find((t) => t.language && t.language === pref) ?? captionTracks().find((t) => !t.auto) ?? captionTracks()[0]).index);
+    }
+  };
+  const setSpeed = (r: number) => { el.playbackRate = r; prefs.setRate(r); setMenu(null); };
+
+  const shownTime = () => scrub() ?? seekTarget() ?? time();
+  const pct = (t: number) => (duration() > 0 ? `${Math.min(100, (t / duration()) * 100)}%` : "0%");
+
+  const MenuPanel = (p: { title: string; children: JSX.Element }) => (
+    <div class="vp-menu" role="menu" onPointerUp={(e) => e.stopPropagation()}>
+      <div class="vp-menu-title">{p.title}</div>
+      <div class="vp-menu-list">{p.children}</div>
+    </div>
+  );
+  const MenuItem = (p: { selected: boolean; label: string; sub?: string; onSelect: () => void }) => (
+    <button class="vp-menu-item" role="menuitemradio" aria-checked={p.selected} onClick={p.onSelect}>
+      <span class="vp-check">{p.selected ? <Icon name="check" size={18} /> : null}</span>
+      <span class="vp-menu-label">{p.label}<Show when={p.sub}><small>{p.sub}</small></Show></span>
+    </button>
+  );
+  const openMenu = (m: Menu) => { setMenu(menu() === m ? null : m); poke(); };
 
   return (
     <div
       ref={container}
       class="vp"
-      classList={{ mini: props.mini, "controls-on": controls() || !playing(), fullscreen: fullscreen() }}
+      classList={{ mini: props.mini, "controls-on": controls() || !playing() || !!menu(), fullscreen: fullscreen(), "fine-pointer": finePointer }}
       onPointerMove={(e) => { if (e.pointerType === "mouse" && !props.mini) poke(); }}
+      onMouseLeave={() => { if (playing() && !menu()) setControls(false); }}
     >
       <video
         ref={el}
@@ -317,14 +500,16 @@ export default function VideoPlayer(props: {
         preload="auto"
         poster={props.poster}
         onPlay={() => { setPlaying(true); player.setPlaying(true); }}
-        onPause={() => { setPlaying(false); player.setPlaying(false); reportProgress(true); }}
+        onPause={() => { setPlaying(false); player.setPlaying(false); setTime(el.currentTime); reportProgress(true); }}
         onWaiting={() => setWaiting(true)}
         onPlaying={() => setWaiting(false)}
         onCanPlay={() => setWaiting(false)}
-        onTimeUpdate={() => { setTime(el.currentTime); updateBuffered(); reportProgress(); }}
+        onSeeking={() => setWaiting(true)}
+        onSeeked={() => { setWaiting(false); setSeekTarget(null); setTime(el.currentTime); updatePositionState(); }}
+        onTimeUpdate={() => { if (!playing()) setTime(el.currentTime); updateBuffered(); reportProgress(); }}
         onDurationChange={() => { setDuration(isFinite(el.duration) ? el.duration : 0); updatePositionState(); }}
         onRateChange={() => { setRate(el.playbackRate); updatePositionState(); }}
-        onSeeked={updatePositionState}
+        onVolumeChange={() => { setVolume(el.volume); setMuted(el.muted); prefs.setVolume(el.volume); prefs.setMuted(el.muted); }}
         onProgress={updateBuffered}
         onEnded={() => { setPlaying(false); reportProgress(true); props.onEnded?.(); }}
         onError={() => { if (!shakaPlayer?.getLoadMode?.()) setPlayError("This video couldn't be played."); }}
@@ -348,15 +533,20 @@ export default function VideoPlayer(props: {
         </div>
       </Show>
 
+      <Show when={!props.mini && activeSegment() && activeSegment()!.type === 5}>
+        <button class="vp-skip-segment" onPointerUp={(e) => e.stopPropagation()} onClick={() => { seekTo(activeSegment()!.timeEnd); poke(); }}>
+          Skip {segmentName(activeSegment()!.name)} <Icon name="skip" size={18} />
+        </button>
+      </Show>
+
       <Show when={!props.mini && !props.error && !playError()}>
-        <div class="vp-controls" aria-hidden={!controls()}>
+        <div class="vp-controls" aria-hidden={!controls() && !menu()}>
           <div class="vp-top">
-            <button class="icon-btn" aria-label="Minimize" onClick={() => (fullscreen() ? toggleFullscreen() : player.minimize())}><Icon name="down" /></button>
-            <div class="spacer" />
+            <button class="icon-btn" aria-label="Minimize" title="Minimize" onClick={() => (fullscreen() ? toggleFullscreen() : player.minimize())}><Icon name="down" /></button>
+            <div class="vp-title">{fullscreen() ? props.video?.name : ""}</div>
             <Show when={pipSupported()}>
-              <button class="icon-btn" aria-label="Picture in picture" onClick={togglePip}><Icon name="pip" /></button>
+              <button class="icon-btn" aria-label="Picture in picture" title="Picture in picture (i)" onClick={togglePip}><Icon name="pip" /></button>
             </Show>
-            <button class="icon-btn" aria-label="Settings" onClick={() => setSettingsOpen(true)}><Icon name="settings" /></button>
           </div>
 
           <div class="vp-middle">
@@ -370,13 +560,6 @@ export default function VideoPlayer(props: {
           </div>
 
           <div class="vp-bottom">
-            <div class="vp-time">
-              <span>{formatDuration(shownTime()) || "0:00"}</span>
-              <span class="faint"> / {formatDuration(duration()) || (props.video?.isLive ? "LIVE" : "0:00")}</span>
-              <div class="spacer" />
-              <button class="vp-pill" onClick={() => setSettingsOpen(true)}>{currentQuality()}{rate() !== 1 ? ` · ${rate()}×` : ""}</button>
-              <button class="icon-btn" aria-label="Full screen" onClick={toggleFullscreen}><Icon name={fullscreen() ? "exitFullscreen" : "fullscreen"} /></button>
-            </div>
             <div
               ref={bar}
               class="vp-bar"
@@ -384,43 +567,96 @@ export default function VideoPlayer(props: {
               onPointerDown={onBarDown}
               onPointerMove={onBarMove}
               onPointerUp={onBarUp}
-              onPointerCancel={() => setScrub(null)}
+              onPointerCancel={() => { setScrub(null); setHover(null); }}
+              onPointerLeave={(e) => { if (e.pointerType === "mouse" && scrub() == null) setHover(null); }}
+              onKeyDown={onBarKey}
               role="slider"
               aria-label="Seek"
               aria-valuemin={0}
               aria-valuemax={Math.floor(duration())}
               aria-valuenow={Math.floor(shownTime())}
+              aria-valuetext={formatDuration(shownTime())}
               tabindex="0"
             >
               <div class="vp-bar-track">
                 <div class="vp-bar-buffer" style={{ width: pct(buffered()) }} />
                 <div class="vp-bar-fill" style={{ width: pct(shownTime()) }} />
+                <For each={segments()}>{(c) => (
+                  <div class="vp-bar-segment" title={segmentName(c.name)} style={{ left: pct(c.timeStart), width: `calc(${pct(c.timeEnd)} - ${pct(c.timeStart)})`, background: segmentColor(c.name) }} />
+                )}</For>
+                <For each={(chapters() ?? []).filter((c) => c.type === 0 && c.timeStart > 0)}>{(c) => <div class="vp-bar-tick" style={{ left: pct(c.timeStart) }} />}</For>
               </div>
               <div class="vp-bar-thumb" style={{ left: pct(shownTime()) }} />
+              <Show when={hover() && duration() > 0}>
+                <div class="vp-bar-tip" style={{ left: `${hover()!.x}px` }}>
+                  <Show when={chapterAt(hover()!.t)}><span class="vp-bar-tip-chapter">{chapterAt(hover()!.t)}</span></Show>
+                  {formatDuration(hover()!.t) || "0:00"}
+                </div>
+              </Show>
+            </div>
+
+            <div class="vp-row">
+              <button class="icon-btn vp-only-fine" aria-label={playing() ? "Pause" : "Play"} title={playing() ? "Pause (k)" : "Play (k)"} onClick={() => { toggle(); poke(); }}>
+                <Icon name={playing() ? "pause" : "play"} filled />
+              </button>
+              <div class="vp-volume vp-only-fine">
+                <button class="icon-btn" aria-label={muted() ? "Unmute" : "Mute"} title="Mute (m)" onClick={() => { el.muted = !el.muted; }}>
+                  <Icon name={muted() || volume() === 0 ? "mute" : "volume"} />
+                </button>
+                <input type="range" min="0" max="1" step="0.02" aria-label="Volume" value={muted() ? 0 : volume()}
+                  onInput={(e) => { el.volume = Number(e.currentTarget.value); el.muted = el.volume === 0; }} />
+              </div>
+              <span class="vp-time">
+                {formatDuration(shownTime()) || "0:00"}
+                <span class="faint"> / {formatDuration(duration()) || (props.video?.isLive ? "LIVE" : "0:00")}</span>
+              </span>
+              <div class="spacer" />
+
+              <Show when={captionTracks().length > 0}>
+                <button class="vp-btn" classList={{ on: currentSubtitleIndex() >= 0 }} aria-label="Captions" title="Captions (c)" aria-expanded={menu() === "captions"} onClick={() => openMenu("captions")}>
+                  <Icon name="captions" />
+                </button>
+              </Show>
+              <Show when={audioTracks().length > 1}>
+                <button class="vp-btn" aria-label="Audio track" title="Audio track" aria-expanded={menu() === "audio"} onClick={() => openMenu("audio")}>
+                  <Icon name="volume" /><span class="vp-btn-label">Audio</span>
+                </button>
+              </Show>
+              <button class="vp-btn" aria-label="Playback speed" title="Speed (< >)" aria-expanded={menu() === "speed"} onClick={() => openMenu("speed")}>
+                <Icon name="gauge" /><span class="vp-btn-label">{rate()}×</span>
+              </button>
+              <Show when={qualities().length > 0}>
+                <button class="vp-btn" aria-label="Quality" title="Quality" aria-expanded={menu() === "quality"} onClick={() => openMenu("quality")}>
+                  <span class="vp-btn-label strong">{currentQuality()}</span>
+                </button>
+              </Show>
+              <button class="icon-btn" aria-label="Full screen" title="Full screen (f)" onClick={toggleFullscreen}><Icon name={fullscreen() ? "exitFullscreen" : "fullscreen"} /></button>
             </div>
           </div>
+
+          <Show when={menu() === "captions"}>
+            <MenuPanel title="Captions">
+              <MenuItem selected={currentSubtitleIndex() < 0} label="Off" onSelect={() => selectCaptions(-1)} />
+              <For each={captionTracks()}>{(t) => <MenuItem selected={currentSubtitleIndex() === t.index} label={t.label} sub={t.auto ? "Auto-generated" : undefined} onSelect={() => selectCaptions(t.index)} />}</For>
+            </MenuPanel>
+          </Show>
+          <Show when={menu() === "audio"}>
+            <MenuPanel title="Audio track">
+              <For each={audioTracks()}>{(t) => <MenuItem selected={currentAudioIndex() === t.index} label={t.label} sub={t.sub} onSelect={() => selectAudio(t.index)} />}</For>
+            </MenuPanel>
+          </Show>
+          <Show when={menu() === "speed"}>
+            <MenuPanel title="Playback speed">
+              <For each={SPEEDS}>{(r) => <MenuItem selected={rate() === r} label={r === 1 ? "Normal" : `${r}×`} onSelect={() => setSpeed(r)} />}</For>
+            </MenuPanel>
+          </Show>
+          <Show when={menu() === "quality"}>
+            <MenuPanel title="Quality">
+              <For each={qualities()}>{(q: any) => <MenuItem selected={currentVideoIndex() === q.index} label={qualityLabel(q)} sub={[q.container?.replace("video/", ""), q.codec].filter(Boolean).join(" · ")} onSelect={() => selectQuality(q.index)} />}</For>
+            </MenuPanel>
+          </Show>
         </div>
       </Show>
-
-      <Sheet open={settingsOpen()} onClose={() => { setSettingsOpen(false); poke(); }} title="Playback">
-        <div class="section-title" style={{ "margin-top": "4px" }}>Quality</div>
-        <div class="list">
-          <For each={qualities()}>
-            {(q: any) => (
-              <button class="list-item" onClick={() => { setSettingsOpen(false); player.selectSource(q.index, props.source?.audioIndex ?? -1); }}>
-                <div class="grow"><div class="title">{q.height ? `${q.height}p${q.fps && q.fps > 30 ? q.fps : ""}` : q.name}</div><div class="sub">{q.container}{q.codec ? ` · ${q.codec}` : ""}</div></div>
-                <Show when={props.source?.videoIndex === q.index}><Icon name="check" /></Show>
-              </button>
-            )}
-          </For>
-        </div>
-        <div class="section-title">Speed</div>
-        <div class="chips" style={{ "flex-wrap": "wrap", overflow: "visible", margin: 0, padding: 0 }}>
-          <For each={[0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 3]}>
-            {(r) => <button class="chip" aria-pressed={rate() === r} onClick={() => { el.playbackRate = r; }}>{r}×</button>}
-          </For>
-        </div>
-      </Sheet>
     </div>
   );
 }

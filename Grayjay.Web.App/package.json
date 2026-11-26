@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@solidjs/router": "^0.15.4",
+    "lucide-solid": "^1.81.0",
     "qrcode-generator": "^2.0.4",
     "shaka-player": "^5.3.6",
     "solid-js": "^1.9.20"

@@ -1,8 +1,9 @@
 import { For, Show, createResource, createSignal, onCleanup } from "solid-js";
-import { SourceConfig, sources } from "../api";
+import { SourceConfig, remoteBrowser, sources } from "../api";
 import { on } from "../api/socket";
 import Icon from "../components/Icon";
 import Sheet from "../components/Sheet";
+import SourceSettingsForm from "../components/SourceSettingsForm";
 import { toast, toastError } from "../components/Toasts";
 import PageHeader from "../shell/PageHeader";
 import "./Sources.css";
@@ -150,6 +151,7 @@ export default function Sources() {
 function SourceDetailsView(props: { id: string; onChanged: () => void; onRemoved: () => void }) {
   const [d, { refetch }] = createResource(() => props.id, (id) => sources.details(id));
   const [signingIn, setSigningIn] = createSignal(false);
+  const [showSettings, setShowSettings] = createSignal(false);
 
   const login = async () => {
     setSigningIn(true);
@@ -162,7 +164,12 @@ function SourceDetailsView(props: { id: string; onChanged: () => void; onRemoved
     finally { setSigningIn(false); }
   };
   const logout = async () => {
-    try { await sources.logout(props.id); toast("Signed out"); refetch(); props.onChanged(); } catch (e) { toastError(e); }
+    try {
+      await sources.logout(props.id);
+      // Also forget the remembered sign-in browser profile so the account isn't offered again.
+      await remoteBrowser.forgetAccounts().catch(() => { });
+      toast("Signed out"); refetch(); props.onChanged();
+    } catch (e) { toastError(e); }
   };
   const remove = async () => {
     if (!confirm(`Remove ${d()?.config.name}?`)) return;
@@ -201,6 +208,15 @@ function SourceDetailsView(props: { id: string; onChanged: () => void; onRemoved
               </Show>
             </div>
           </div>
+        </Show>
+
+        <Show when={(d()!.config.settings?.length ?? 0) > 0}>
+          <button class="list-item card" style={{ padding: "14px 16px" }} onClick={() => setShowSettings(!showSettings())} aria-expanded={showSettings()}>
+            <Icon name="settings" />
+            <div class="grow"><div class="title">Settings</div><div class="sub">{/youtube/i.test(d()!.config.name) ? "SponsorBlock, dislikes, DeArrow, streams…" : "Options for this source"}</div></div>
+            <Icon name={showSettings() ? "up" : "down"} size={18} />
+          </button>
+          <Show when={showSettings()}><SourceSettingsForm id={props.id} /></Show>
         </Show>
 
         <div class="list">

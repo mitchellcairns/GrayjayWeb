@@ -93,6 +93,16 @@ export async function post<T = any>(url: string, body?: unknown, signal?: AbortS
   }));
 }
 
+/** Uploads a file as the raw request body (works for large backups without multipart parsing). */
+export async function upload<T = any>(url: string, file: Blob): Promise<T> {
+  return handle(await fetch(url, {
+    method: "POST",
+    headers: headers({ "Content-Type": file.type || "application/octet-stream" }),
+    body: file,
+    credentials: "same-origin",
+  }));
+}
+
 export async function del<T = any>(url: string): Promise<T> {
   return handle(await fetch(url, { method: "DELETE", headers: headers(), credentials: "same-origin" }));
 }
