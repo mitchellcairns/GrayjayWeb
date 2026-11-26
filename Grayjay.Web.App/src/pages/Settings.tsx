@@ -7,6 +7,7 @@ import Icon from "../components/Icon";
 import Sheet from "../components/Sheet";
 import PairDevice from "../components/PairDevice";
 import PlaybackSettings from "../components/PlaybackSettings";
+import LinkSetup from "../components/LinkSetup";
 import { FeedLookSettings, HiddenCreatorsSettings } from "../components/FeedSettings";
 import { toast, toastError } from "../components/Toasts";
 import PageHeader from "../shell/PageHeader";
@@ -20,6 +21,8 @@ export default function Settings() {
   const [params] = useSearchParams();
   // The tray app's "Pair a phone" opens /app/settings?pair=1.
   const [pairOpen, setPairOpen] = createSignal(params.pair === "1");
+  // /app/settings?links=1 opens the "Open links in Grayjay" guide directly.
+  const [linksOpen, setLinksOpen] = createSignal(params.links === "1");
   const [licenseOpen, setLicenseOpen] = createSignal(false);
   const [license, setLicense] = createSignal("");
 
@@ -74,6 +77,18 @@ export default function Settings() {
 
         <h2 class="section-title" id="hidden-creators">Hidden creators</h2>
         <HiddenCreatorsSettings />
+
+        <h2 class="section-title">Open links in Grayjay</h2>
+        <div class="list">
+          <button class="list-item" onClick={() => setLinksOpen(true)}>
+            <Icon name="share" />
+            <div class="grow"><div class="title">Open YouTube links in Grayjay</div><div class="sub wrap">Send videos from YouTube and other apps here, and use it away from home</div></div>
+            <Icon name="forward" size={18} />
+          </button>
+        </div>
+        <Sheet open={linksOpen()} onClose={() => setLinksOpen(false)} title="Open links in Grayjay" size="tall">
+          <LinkSetup />
+        </Sheet>
 
         <Show when={!standalone}>
           <h2 class="section-title">Install the app</h2>

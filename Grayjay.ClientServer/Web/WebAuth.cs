@@ -346,6 +346,13 @@ namespace Grayjay.ClientServer.Web
                 });
             });
 
+            // Addresses phones should use (for the in-app setup guides): Tailscale Serve's HTTPS address and configured URLs.
+            app.MapGet("/web/Addresses", () => Results.Json(new
+            {
+                tailscale = TailscaleInfo.ServeOrigin(_options.Port),
+                configured = _options.PublicUrls.Select(u => u.TrimEnd('/')).ToList()
+            }));
+
             app.MapGet("/auth/Devices", (HttpContext ctx) =>
             {
                 var current = GetDevice(ctx);

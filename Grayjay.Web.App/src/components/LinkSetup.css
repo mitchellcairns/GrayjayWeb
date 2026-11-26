@@ -1,0 +1,20 @@
+.link-setup { display: flex; flex-direction: column; gap: 6px; }
+.ls-platforms { align-self: flex-start; max-width: 100%; overflow-x: auto; margin-bottom: 6px; }
+.ls-h { font-size: 16px; font-weight: 700; margin: 12px 0 4px; }
+.ls-p { font-size: 14px; margin: 2px 0 6px; }
+.ls-steps { list-style: none; padding: 0; margin: 4px 0 6px; display: flex; flex-direction: column; gap: 10px; }
+.ls-step { display: flex; gap: 10px; font-size: 14px; line-height: 1.45; }
+.ls-num { flex: none; width: 22px; height: 22px; border-radius: 50%; background: var(--bg-elev-2); display: grid; place-items: center; font-size: 12px; font-weight: 700; margin-top: 1px; }
+.ls-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.ls-store { color: var(--accent); }
+.ls-copy { display: flex; align-items: center; gap: 8px; margin-top: 6px; padding: 6px 6px 6px 10px; border-radius: var(--radius-s); background: var(--bg-elev-2); }
+.ls-copy code { flex: 1; min-width: 0; font-size: 12.5px; overflow-wrap: anywhere; }
+.ls-note { display: flex; gap: 8px; align-items: flex-start; font-size: 13.5px; padding: 10px 12px; border-radius: var(--radius); background: color-mix(in srgb, #f5a524 14%, transparent); color: var(--text); }
+.ls-note svg { flex: none; color: #f5a524; margin-top: 2px; }
+.ls-ok { display: flex; gap: 8px; align-items: flex-start; font-size: 13.5px; color: var(--ok); margin: 4px 0; }
+.ls-ok svg { flex: none; margin-top: 2px; }
+.ls-more { margin-top: 8px; font-size: 14px; }
+.ls-more summary { cursor: pointer; color: var(--text-2); font-weight: 600; padding: 6px 0; }
+.ls-more p { font-size: 13.5px; margin: 4px 0 8px; }
+.ls-bookmarklet { cursor: grab; }
+.link-setup code { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
