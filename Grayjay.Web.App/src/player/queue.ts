@@ -11,6 +11,7 @@ function slim(c: Content): Content {
   return {
     contentType: c.contentType, id: c.id, name: c.name ?? c.contentName, url: c.url, author: c.author,
     thumbnails: c.thumbnails ?? c.contentThumbnails, duration: c.duration, dateTime: c.dateTime, viewCount: c.viewCount, isLive: c.isLive,
+    resumeAt: c.resumeAt,
   } as Content;
 }
 

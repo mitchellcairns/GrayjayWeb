@@ -7,6 +7,7 @@ import { channelHref } from "../lib/nav";
 import { ui } from "../lib/ui";
 import { queue } from "../player/queue";
 import { player } from "../player/store";
+import { skip } from "../player/skip";
 import Icon from "./Icon";
 import Sheet from "./Sheet";
 import { toast, toastAction, toastError } from "./Toasts";
@@ -66,7 +67,12 @@ function QueueRow(props: {
   item: Content; index: number; count: number; drag: DragState | null; shift: number; settling: boolean;
   onGrip: (e: PointerEvent, index: number) => void;
 }) {
-  const play = () => { const it = queue.take(props.item.url); if (it) player.playNow(it.url, it); };
+  const play = () => {
+    const it = queue.take(props.item.url);
+    if (!it) return;
+    if (player.mode() !== "closed") skip.rememberCurrent(); // a jump is a skip too: Previous comes back here
+    player.playNow(it.url, it, it.resumeAt);
+  };
   const dragging = () => props.drag?.from === props.index;
   const onKey = (e: KeyboardEvent) => {
     if (e.key === "ArrowUp" && props.index > 0) { e.preventDefault(); queue.move(props.index, -1); }
@@ -203,12 +209,7 @@ function QueueSheet() {
         <div class="queue-prev">
           <span class="faint">Before this</span>
           <div class="queue-prev-title">{queue.previous()!.name}</div>
-          <button class="btn small" onClick={() => {
-            const prev = queue.previous()!; const cur = player.video() ?? player.preview();
-            queue.setPrevious(null);
-            if (cur?.url && cur.url !== prev.url) queue.addNext(cur as Content);
-            player.playNow(prev.url, prev);
-          }}><Icon name="previous" size={16} /> Back</button>
+          <button class="btn small" onClick={() => skip.backToPreviousVideo()}><Icon name="previous" size={16} /> Back</button>
         </div>
       </Show>
       <Show when={queue.count() > 0} fallback={
@@ -219,7 +220,7 @@ function QueueSheet() {
           <span class="faint">{queue.count()} video{queue.count() === 1 ? "" : "s"}</span>
           <div class="row" style={{ gap: "8px" }}>
             <button class="btn small ghost" onClick={() => queue.clear()}>Clear</button>
-            <button class="btn small accent" onClick={() => { const it = queue.shift(); if (it) player.playNow(it.url, it); ui.setQueueOpen(false); }}>
+            <button class="btn small accent" onClick={() => { const it = queue.shift(); if (it) { if (player.mode() !== "closed") skip.rememberCurrent(); player.playNow(it.url, it, it.resumeAt); } ui.setQueueOpen(false); }}>
               <Icon name="play" filled size={16} /> {player.mode() === "closed" ? "Play" : "Play next now"}
             </button>
           </div>

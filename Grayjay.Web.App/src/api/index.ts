@@ -24,6 +24,8 @@ export interface Content {
   duration?: number;
   viewCount?: number;
   isLive?: boolean;
+  /** [GrayjayWeb] Queue/previous entries: where to resume when you come back to it (seconds). */
+  resumeAt?: number;
   // post
   description?: string;
   images?: string[];

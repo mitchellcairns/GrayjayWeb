@@ -11,6 +11,7 @@ import Sheet from "../components/Sheet";
 import { toast, toastError } from "../components/Toasts";
 import VideoPlayer from "./VideoPlayer";
 import { queue } from "./queue";
+import { skip } from "./skip";
 import { hidden } from "../lib/hidden";
 import { ui } from "../lib/ui";
 import { watchLater } from "../lib/watchLater";
@@ -170,24 +171,16 @@ export default function WatchOverlay() {
 
   // Queue first, then the top Up next suggestion.
   const nextItem = () => queue.items()[0] ?? shownRecs()[0];
-  const current = () => (v() ?? player.preview()) as Content | null;
-  const playNext = () => {
+  // Next: queue first, then the top Up next suggestion. Remembers where you were so Previous can bring you back
+  // (see skip.ts); a queued video you'd skipped back from resumes where you left it.
+  const advance = () => {
     const q = queue.shift();
     const next = q ?? shownRecs()[0];
     if (!next) return;
-    const cur = current();
-    if (cur?.url) queue.setPrevious(cur); // one step back stays possible
-    player.playNow(next.url, next);
+    skip.rememberCurrent();
+    player.playNow(next.url, next, q?.resumeAt);
   };
-  // Back to the video before the last Next; the one you skipped goes back to the front of the queue.
-  const playPrevious = () => {
-    const prev = queue.previous();
-    if (!prev) return;
-    const cur = current();
-    queue.setPrevious(null);
-    if (cur?.url && cur.url !== prev.url) queue.addNext(cur);
-    player.playNow(prev.url, prev);
-  };
+  const playNext = () => skip.next(advance);
 
   // Swipe the player down to minimize (touch).
   let startY = 0, startX = 0, dy = 0, tracking = false, panel!: HTMLDivElement;
@@ -238,10 +231,11 @@ export default function WatchOverlay() {
             loading={player.loading()}
             error={player.error()}
             onEnded={playNext}
-            onNext={nextItem() ? playNext : undefined}
-            onPrevious={queue.previous() && queue.previous()!.url !== player.url() ? playPrevious : undefined}
+            onNext={nextItem() || skip.canUndoRestart() ? playNext : undefined}
+            nextTitle={skip.canUndoRestart() ? "Back to where you were" : nextItem()?.name}
+            onPrevious={() => skip.previous()}
+            hasPreviousVideo={!!queue.previous() && queue.previous()!.url !== player.url()}
             previousTitle={queue.previous()?.name}
-            nextTitle={nextItem()?.name}
           />
         </div>
 

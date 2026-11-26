@@ -54,7 +54,7 @@ export const handoff = createRoot(() => {
       clientId: self.clientId, deviceName: guessName(), heartbeat,
       url: player.mode() === "closed" ? undefined : player.url() ?? undefined,
       name: v?.name, thumbnail: bestThumbnail(v?.thumbnails, 480), author: v?.author?.name,
-      position: el && isFinite(el.currentTime) ? el.currentTime : 0,
+      position: el && isFinite(el.currentTime) && player.mediaUrl() === player.url() ? el.currentTime : 0,
       duration: el && isFinite(el.duration) ? el.duration : v?.duration ?? 0,
       playing: player.playing(), audioOnly: prefs.audioOnly(),
     };

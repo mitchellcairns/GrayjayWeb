@@ -75,6 +75,11 @@ function createPlayerStore() {
   const [playing, setPlaying] = createSignal(false);
   /** True once the current video actually started playing (frames moving), so lower-priority loads can begin. */
   const [started, setStarted] = createSignal(false);
+  /**
+   * Which video the <video> element's media actually belongs to. While the next video loads, the element still holds
+   * the old one: its position must not be saved (or reported to other devices) as the new video's.
+   */
+  const [mediaUrl, setMediaUrl] = createSignal<string | null>(null);
 
   let nav: NavBridge | null = null;
   let openedViaPush = false;
@@ -96,6 +101,7 @@ function createPlayerStore() {
         historyApi.position(target).catch(() => 0),
       ]);
       if (token !== loadToken || superseded) return;
+      if (!v) throw new Error("This video couldn't be loaded. Its source may need you to sign in (Sources).");
       setVideo(v);
       const duration = v.duration ?? 0;
       // Resume where you left off unless you'd finished it.
@@ -133,7 +139,7 @@ function createPlayerStore() {
   }
 
   return {
-    mode, url, preview, video, source, startAt, loading, error, videoEl, setVideoEl, playing, setPlaying, started, setStarted,
+    mode, url, preview, video, source, startAt, loading, error, videoEl, setVideoEl, playing, setPlaying, started, setStarted, mediaUrl, setMediaUrl,
 
     bindNavigation(bridge: NavBridge) { nav = bridge; },
 
@@ -160,12 +166,15 @@ function createPlayerStore() {
      * Switch to another video without changing full/mini (queue, autoplay, lock-screen "next"). Opens full screen if
      * nothing is playing. Replaces the ?watch= entry rather than stacking history.
      */
-    playNow(target: string, previewItem?: Content) {
-      if (mode() === "closed") { this.open(target, previewItem); return; }
+    playNow(target: string, previewItem?: Content, startAt?: number) {
+      if (mode() === "closed") { this.open(target, previewItem, startAt); return; }
       if (target !== url()) {
         unlock();
         batch(() => { setPreview(previewItem ?? null); setUrl(target); });
-        load(target);
+        load(target, startAt);
+      } else if (startAt != null) {
+        const el = videoEl();
+        if (el) { el.currentTime = startAt; el.play().catch(() => { }); }
       }
       if (mode() === "full") nav?.setWatchParam(target, true);
     },

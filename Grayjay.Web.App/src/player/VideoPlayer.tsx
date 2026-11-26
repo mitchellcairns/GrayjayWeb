@@ -84,8 +84,10 @@ export default function VideoPlayer(props: {
   /** Skip to the next queued / Up next video (also the lock-screen "next" button). */
   onNext?: () => void;
   nextTitle?: string;
-  /** Back to the video before the last Next. */
+  /** Previous: restarts this video past 30 s, else back to the video before the last Next (see skip.ts). */
   onPrevious?: () => void;
+  /** There's a video to go back to (otherwise Previous only shows once you're 30 s in, to restart). */
+  hasPreviousVideo?: boolean;
   previousTitle?: string;
 }) {
   let container!: HTMLDivElement;
@@ -140,9 +142,19 @@ export default function VideoPlayer(props: {
   }
 
   const [usingShaka, setUsingShaka] = createSignal(false);
+  // A new video is loading (source cleared): stop the old one now (it used to keep playing behind the loading
+  // spinner, or behind an error), remembering whether to autoplay what comes next.
+  let pendingAutoplay: boolean | null = null;
   createEffect(on(() => props.source, (src) => {
     const wasPaused = el.currentTime > 0 && el.paused && !el.ended;
-    loadSource(src, props.startAt || 0, !wasPaused);
+    if (!src) {
+      pendingAutoplay ??= !wasPaused;
+      if (!el.paused) el.pause();
+      return;
+    }
+    const autoplay = pendingAutoplay ?? !wasPaused;
+    pendingAutoplay = null;
+    loadSource(src, props.startAt || 0, autoplay);
   }));
 
   async function loadSource(src: SourceDescriptor | null, start: number, autoplay: boolean) {
@@ -150,6 +162,7 @@ export default function VideoPlayer(props: {
     setNeedsTap(false);
     setSeekTarget(null);
     if (!src) return;
+    player.setMediaUrl(player.url());
     try {
       if (isStreamType(src.type)) {
         const nativeHls = src.type.includes("mpegurl") && el.canPlayType("application/vnd.apple.mpegurl") && isIOS;
@@ -306,15 +319,32 @@ export default function VideoPlayer(props: {
     const r = bar.getBoundingClientRect();
     return Math.max(0, Math.min(1, (clientX - r.left) / r.width)) * (duration() || 0);
   };
+  // Touch scrubbing shows a "Cancel" drop target over the video: let go on it and nothing changes.
+  const [touchScrub, setTouchScrub] = createSignal(false);
+  const [overCancel, setOverCancel] = createSignal(false);
+  let cancelZone: HTMLDivElement | undefined;
+  const inCancelZone = (x: number, y: number) => {
+    const r = cancelZone?.getBoundingClientRect();
+    if (!r) return false;
+    const pad = 14; // forgiving: fingers are imprecise
+    return x >= r.left - pad && x <= r.right + pad && y >= r.top - pad && y <= r.bottom + pad;
+  };
   const onBarDown = (e: PointerEvent) => {
     e.stopPropagation();
     e.preventDefault();
     try { bar.setPointerCapture(e.pointerId); } catch { }
+    setTouchScrub(e.pointerType !== "mouse");
+    setOverCancel(false);
     setScrub(posFromX(e.clientX));
     setMenu(null);
     poke();
   };
   const onBarMove = (e: PointerEvent) => {
+    if (scrub() != null && touchScrub()) {
+      const over = inCancelZone(e.clientX, e.clientY);
+      if (over !== overCancel()) { setOverCancel(over); if (over) navigator.vibrate?.(10); }
+      if (over) { poke(); return; } // hold the preview where it was while hovering Cancel
+    }
     const t = posFromX(e.clientX);
     if (scrub() != null) { setScrub(t); poke(); }
     if (e.pointerType === "mouse" || scrub() != null) {
@@ -324,7 +354,10 @@ export default function VideoPlayer(props: {
   };
   const onBarUp = (e: PointerEvent) => {
     if (scrub() == null) return;
-    seekTo(posFromX(e.clientX));
+    const cancelled = touchScrub() && (overCancel() || inCancelZone(e.clientX, e.clientY));
+    setTouchScrub(false);
+    setOverCancel(false);
+    if (!cancelled) seekTo(posFromX(e.clientX));
     setScrub(null);
     if (e.pointerType !== "mouse") setHover(null);
     poke();
@@ -433,7 +466,7 @@ export default function VideoPlayer(props: {
     set("enterpictureinpicture" as MediaSessionAction, prefs.popOut() && !prefs.audioOnly()
       ? async () => { try { await el.requestPictureInPicture(); } catch { } } : null);
     // Like a music player: restart this video, or (in its first seconds) go back to the previous one.
-    set("previoustrack", () => { if (props.onPrevious && el.currentTime < 5) props.onPrevious(); else seekTo(0); });
+    set("previoustrack", () => { if (props.onPrevious) props.onPrevious(); else seekTo(0); });
   });
   const updatePositionState = () => {
     if (!("mediaSession" in navigator) || !isFinite(el.duration) || el.duration <= 0) return;
@@ -469,7 +502,7 @@ export default function VideoPlayer(props: {
   let lastReport = 0;
   const reportProgress = (force = false) => {
     const u = player.url();
-    if (!u || !isFinite(el.currentTime) || el.currentTime < 1) return;
+    if (!u || u !== player.mediaUrl() || !isFinite(el.currentTime) || el.currentTime < 1) return;
     const now = Date.now();
     if (!force && now - lastReport < 10000) return;
     lastReport = now;
@@ -635,7 +668,21 @@ export default function VideoPlayer(props: {
         <div class="vp-error">
           <Icon name="alert" />
           <p>{props.error || playError()}</p>
-          <button class="btn small" onClick={() => player.retry()}>Retry</button>
+          <div class="row" style={{ gap: "8px", "justify-content": "center" }}>
+            <Show when={props.onPrevious && props.hasPreviousVideo}>
+              <button class="btn small" onClick={() => props.onPrevious!()}><Icon name="previous" size={16} /> Previous</button>
+            </Show>
+            <button class="btn small" onClick={() => player.retry()}>Retry</button>
+            <Show when={props.onNext}>
+              <button class="btn small" onClick={() => props.onNext!()}>Next <Icon name="skip" size={16} /></button>
+            </Show>
+          </div>
+        </div>
+      </Show>
+
+      <Show when={scrub() != null && touchScrub()}>
+        <div ref={cancelZone} class="vp-scrub-cancel" classList={{ over: overCancel() }} aria-hidden="true">
+          <Icon name="close" size={18} /> {overCancel() ? "Release to cancel" : "Cancel"}
         </div>
       </Show>
 
@@ -678,7 +725,7 @@ export default function VideoPlayer(props: {
               onPointerDown={onBarDown}
               onPointerMove={onBarMove}
               onPointerUp={onBarUp}
-              onPointerCancel={() => { setScrub(null); setHover(null); }}
+              onPointerCancel={() => { setScrub(null); setHover(null); setTouchScrub(false); setOverCancel(false); }}
               onPointerLeave={(e) => { if (e.pointerType === "mouse" && scrub() == null) setHover(null); }}
               onKeyDown={onBarKey}
               role="slider"
@@ -723,8 +770,10 @@ export default function VideoPlayer(props: {
               </span>
               <div class="spacer" />
 
-              <Show when={props.onPrevious}>
-                <button class="icon-btn" aria-label="Previous video" title={props.previousTitle ? `Back to: ${props.previousTitle} (Shift+P)` : "Previous (Shift+P)"} onClick={() => { props.onPrevious!(); poke(); }}>
+              <Show when={props.onPrevious && (props.hasPreviousVideo || time() > 30)}>
+                <button class="icon-btn" aria-label={time() > 30 || !props.hasPreviousVideo ? "Back to start" : "Previous video"}
+                  title={time() > 30 || !props.hasPreviousVideo ? "Back to start (Shift+P)" : `Back to: ${props.previousTitle ?? "previous video"} (Shift+P)`}
+                  onClick={() => { props.onPrevious!(); poke(); }}>
                   <Icon name="previous" />
                 </button>
               </Show>
