@@ -5,7 +5,7 @@ import { bestThumbnail, formatDuration } from "../lib/format";
 import Icon from "../components/Icon";
 import { player, prefs } from "./store";
 import { QueueButton } from "../components/GlobalSheets";
-import { consumeSuppressedTap } from "./gesture";
+import { consumeSuppressedTap, suppressNextTap } from "./gesture";
 import { toast } from "../components/Toasts";
 import "./VideoPlayer.css";
 
@@ -335,22 +335,34 @@ export default function VideoPlayer(props: {
   };
 
   // ---------- Fullscreen / PiP ----------
+  const inNativeFs = () => !!(document.fullscreenElement || (document as any).webkitFullscreenElement);
   const [appFs, setAppFs] = createSignal(false);
   let appFsByRotation = false;
+  // Full-window mode adds a history entry, so Android's Back gesture leaves fullscreen instead of shrinking the player.
+  let fsHistory = false;
   const setAppFullscreen = async (on: boolean, byRotation = false) => {
+    if (on === appFs()) return;
     appFsByRotation = on && byRotation;
     setAppFs(on);
-    setFullscreen(on);
+    setFullscreen(on || inNativeFs());
     poke();
+    if (on && !fsHistory) { history.pushState({ ...(history.state ?? {}), gjFullscreen: true }, ""); fsHistory = true; }
+    else if (!on && fsHistory) { fsHistory = false; if (history.state?.gjFullscreen) history.back(); }
     try {
       if (on && !byRotation && el.videoWidth >= el.videoHeight) await (screen.orientation as any)?.lock?.("landscape");
       else if (!on) (screen.orientation as any)?.unlock?.();
     } catch { } // not allowed outside the Fullscreen API on some versions: rotating the phone still works
   };
+  const onPopState = () => {
+    if (appFs() && !history.state?.gjFullscreen) { fsHistory = false; setAppFullscreen(false); }
+  };
+  addEventListener("popstate", onPopState);
+  onCleanup(() => removeEventListener("popstate", onPopState));
   if (appFullscreenMode) {
     const landscape = matchMedia("(orientation: landscape)");
     const onRotate = () => {
-      if (props.mini || player.mode() !== "full") return;
+      // Real fullscreen rotates the screen itself: that must not also switch on the full-window mode.
+      if (props.mini || player.mode() !== "full" || inNativeFs()) return;
       if (landscape.matches && !appFs() && el.videoWidth >= el.videoHeight) setAppFullscreen(true, true);
       else if (!landscape.matches && appFs() && appFsByRotation) setAppFullscreen(false);
     };
@@ -360,13 +372,17 @@ export default function VideoPlayer(props: {
   createEffect(on(() => props.mini, (m) => { if (m && appFs()) setAppFullscreen(false); }));
 
   const toggleFullscreen = async () => {
-    // With "Pop out when leaving the app" on, Android only pops out a video that's in real (Fullscreen API) fullscreen.
-    if (appFullscreenMode && (appFs() || !prefs.popOut())) { await setAppFullscreen(!appFs()); return; }
     const d = document as any;
-    if (document.fullscreenElement || d.webkitFullscreenElement) {
+    // Leaving: whichever kind is on (both, if something left them stacked).
+    if (inNativeFs()) {
+      if (appFs()) await setAppFullscreen(false);
       await (document.exitFullscreen?.() ?? d.webkitExitFullscreen?.());
       return;
     }
+    if (appFs()) { await setAppFullscreen(false); return; }
+    // Entering. Installed Android app: full-window, unless "Pop out when leaving the app" is on (Android only pops out
+    // a video that's in real fullscreen).
+    if (appFullscreenMode && !prefs.popOut()) { await setAppFullscreen(true); return; }
     if (canElementFullscreen) {
       await (container.requestFullscreen?.({ navigationUI: "hide" }) ?? (container as any).webkitRequestFullscreen?.());
       try {
@@ -376,13 +392,34 @@ export default function VideoPlayer(props: {
       (el as any).webkitEnterFullscreen?.(); // iPhone: native fullscreen player
     }
   };
-  const onFsChange = () => setFullscreen(!!(document.fullscreenElement || (document as any).webkitFullscreenElement));
+  const onFsChange = () => setFullscreen(inNativeFs() || appFs());
   document.addEventListener("fullscreenchange", onFsChange);
   document.addEventListener("webkitfullscreenchange", onFsChange);
   onCleanup(() => {
     document.removeEventListener("fullscreenchange", onFsChange);
     document.removeEventListener("webkitfullscreenchange", onFsChange);
   });
+
+  // ---------- Swipe: down leaves fullscreen, up enters it (touch) ----------
+  let swipe: { x: number; y: number } | null = null;
+  const onSwipeStart = (e: TouchEvent) => {
+    if (props.mini || e.touches.length !== 1 || (e.target as Element).closest?.(".vp-bar, .vp-menu, .vp-volume")) { swipe = null; return; }
+    swipe = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+  };
+  const onSwipeMove = (e: TouchEvent) => {
+    if (!swipe) return;
+    const dy = e.touches[0].clientY - swipe.y;
+    if (Math.abs(dy) > 14) suppressNextTap(); // it's a swipe, not a tap: don't also toggle the controls
+  };
+  const onSwipeEnd = (e: TouchEvent) => {
+    if (!swipe) return;
+    const t = e.changedTouches[0];
+    const dx = t.clientX - swipe.x, dy = t.clientY - swipe.y;
+    swipe = null;
+    if (Math.abs(dy) < 70 || Math.abs(dy) < Math.abs(dx) * 1.5) return;
+    if (fullscreen() && dy > 0) toggleFullscreen();
+    else if (!fullscreen() && dy < 0) toggleFullscreen();
+  };
 
   const pipSupported = () => !!(document.pictureInPictureEnabled || (el as any)?.webkitSupportsPresentationMode?.("picture-in-picture"));
   const togglePip = async () => {
@@ -570,6 +607,9 @@ export default function VideoPlayer(props: {
       class="vp"
       classList={{ mini: props.mini, "app-fullscreen": appFs(), "controls-on": controls() || !playing() || !!menu(), fullscreen: fullscreen(), "fine-pointer": finePointer }}
       onPointerMove={(e) => { if (e.pointerType === "mouse" && !props.mini) poke(); }}
+      onTouchStart={onSwipeStart}
+      onTouchMove={onSwipeMove}
+      onTouchEnd={onSwipeEnd}
       onMouseLeave={() => { if (playing() && !menu()) setControls(false); }}
     >
       <video
@@ -632,7 +672,7 @@ export default function VideoPlayer(props: {
       <Show when={!props.mini && !props.error && !playError()}>
         <div class="vp-controls" aria-hidden={!controls() && !menu()}>
           <div class="vp-top">
-            <button class="icon-btn" aria-label="Minimize" title="Minimize" onClick={() => (fullscreen() ? toggleFullscreen() : player.minimize())}><Icon name="down" /></button>
+            <button class="icon-btn vp-exit" aria-label={fullscreen() ? "Exit full screen" : "Minimize"} title={fullscreen() ? "Exit full screen (or swipe down)" : "Minimize"} onClick={() => (fullscreen() ? toggleFullscreen() : player.minimize())}><Icon name="down" /></button>
             <div class="vp-title">{fullscreen() ? props.video?.name : ""}</div>
             <button class="vp-btn vp-audio-btn" classList={{ on: prefs.audioOnly() }} aria-pressed={prefs.audioOnly()}
               aria-label={prefs.audioOnly() ? "Switch back to video" : "Audio only"} title={prefs.audioOnly() ? "Back to video (a)" : "Audio only — screen can turn off (a)"} onClick={() => { toggleAudioOnly(); poke(); }}>
