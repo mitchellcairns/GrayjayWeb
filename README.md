@@ -24,13 +24,19 @@ A web page can't run Grayjay by itself. Browsers block pages from reading other 
 
 ### Docker (home servers, NAS, WireGuard)
 
+Needs Docker with Compose, Git and Git LFS (`sudo apt install git git-lfs` on Debian/Ubuntu). About 2 GB of RAM to build.
+
 ```bash
-git clone --recurse-submodules https://github.com/mitchellcairns/GrayjayWeb.git   # needs Git LFS
+GIT_LFS_SKIP_SMUDGE=1 git clone --depth 1 --recurse-submodules --shallow-submodules https://github.com/mitchellcairns/GrayjayWeb.git
 cd GrayjayWeb
+git lfs install
+git lfs pull --include "Grayjay.ClientServer/deps/linux-x64/**"     # ARM (e.g. Raspberry Pi 5): linux-arm64
 # edit docker-compose.yml: set GRAYJAY_PUBLIC_URLS to the address your phones use (e.g. your WireGuard IP)
-docker compose up -d --build
-docker compose logs grayjay | grep -i "pairing code"   # first device: enter this code on your phone
+docker compose up -d --build                                       # first build takes ~5-10 minutes
+docker compose logs grayjay | grep -i "pairing code"               # enter this code on your first device
 ```
+
+To update later: `git pull --recurse-submodules && git lfs pull --include "Grayjay.ClientServer/deps/linux-x64/**" && docker compose up -d --build`.
 
 - The image bundles Chromium for plugin sign-in, ffmpeg, and the PWA; data lives in the `grayjay-data` volume.
 - **WireGuard:** phones on the tunnel reach the server at its WireGuard IP, e.g. `http://10.8.0.1:11338/app/`. Set `GRAYJAY_PUBLIC_URLS=http://10.8.0.1:11338` so pairing QR codes use that address.

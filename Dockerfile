@@ -24,6 +24,11 @@ RUN case "$TARGETARCH" in \
       arm64) RID=linux-arm64 ;; \
       *)     RID=linux-x64 ;; \
     esac \
+ && if head -c 200 "Grayjay.ClientServer/deps/$RID/ffmpeg" | grep -q "git-lfs"; then \
+      echo "ERROR: Grayjay.ClientServer/deps/$RID holds Git LFS pointer files, not the real binaries." >&2; \
+      echo "Run: git lfs install && git lfs pull --include \"Grayjay.ClientServer/deps/$RID/**\"   then build again." >&2; \
+      exit 1; \
+    fi \
  && dotnet publish Grayjay.Web.Host/Grayjay.Web.Host.csproj -c Release -r $RID --self-contained true -o /out \
  && test -f /out/app/index.html \
  && cp LICENSE.md /out/LICENSE.md
