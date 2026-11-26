@@ -24,19 +24,31 @@ A web page can't run Grayjay by itself. Browsers block pages from reading other 
 
 ### Docker (home servers, NAS, WireGuard)
 
-Needs Docker with Compose, Git and Git LFS (`sudo apt install git git-lfs` on Debian/Ubuntu). About 2 GB of RAM to build.
+There's a prebuilt image for x86-64 and ARM64: `ghcr.io/mitchellcairns/grayjayweb`. You don't need to clone or build anything:
+
+```bash
+mkdir grayjay && cd grayjay
+curl -fsSLO https://raw.githubusercontent.com/mitchellcairns/GrayjayWeb/web/docker-compose.yml
+mkdir docker && curl -fsSL -o docker/Caddyfile https://raw.githubusercontent.com/mitchellcairns/GrayjayWeb/web/docker/Caddyfile   # only for HTTPS
+# edit docker-compose.yml: set GRAYJAY_PUBLIC_URLS to the address your phones use (e.g. your WireGuard IP)
+docker compose up -d
+docker compose logs grayjay | grep -i "pairing code"               # enter this code on your first device
+```
+
+To update: `docker compose pull && docker compose up -d`.
+
+<details><summary>Building the image yourself instead</summary>
+
+Needs Git and Git LFS (`sudo apt install git git-lfs`) and about 2 GB of RAM.
 
 ```bash
 GIT_LFS_SKIP_SMUDGE=1 git clone --depth 1 --recurse-submodules --shallow-submodules https://github.com/mitchellcairns/GrayjayWeb.git
 cd GrayjayWeb
 git lfs install
-git lfs pull --include "Grayjay.ClientServer/deps/linux-x64/**"     # ARM (e.g. Raspberry Pi 5): linux-arm64
-# edit docker-compose.yml: set GRAYJAY_PUBLIC_URLS to the address your phones use (e.g. your WireGuard IP)
-docker compose up -d --build                                       # first build takes ~5-10 minutes
-docker compose logs grayjay | grep -i "pairing code"               # enter this code on your first device
+git lfs pull --include "Grayjay.ClientServer/deps/linux-x64/**"     # ARM: linux-arm64
+docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
 ```
-
-To update later: `git pull --recurse-submodules && git lfs pull --include "Grayjay.ClientServer/deps/linux-x64/**" && docker compose up -d --build`.
+</details>
 
 - The image bundles Chromium for plugin sign-in, ffmpeg, and the PWA; data lives in the `grayjay-data` volume.
 - **WireGuard:** phones on the tunnel reach the server at its WireGuard IP, e.g. `http://10.8.0.1:11338/app/`. Set `GRAYJAY_PUBLIC_URLS=http://10.8.0.1:11338` so pairing QR codes use that address.
