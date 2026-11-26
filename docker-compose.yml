@@ -1,4 +1,10 @@
-# [GrayjayWeb] docker compose up -d --build
+# [GrayjayWeb] Grayjay Web with Docker Compose. Uses the prebuilt image, so this file (plus docker/Caddyfile if you
+# want HTTPS) is all you need:
+#
+#   docker compose up -d
+#
+# To build the image from source instead (clone the repo with Git LFS first):
+#   docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
 #
 # First run: get the one-time pairing code with   docker compose logs grayjay | grep -i pairing
 # then open http://<server>:11338/app/ on your phone and enter it (or scan a QR code later from Settings → Pair).
@@ -9,8 +15,7 @@
 
 services:
   grayjay:
-    build: .
-    image: grayjayweb:latest
+    image: ghcr.io/mitchellcairns/grayjayweb:latest
     container_name: grayjay
     restart: unless-stopped
     ports:

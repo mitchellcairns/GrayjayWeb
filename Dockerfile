@@ -1,13 +1,15 @@
 # [GrayjayWeb] Self-hosted Grayjay server + PWA in one container.
 #
-#   git clone --recurse-submodules https://github.com/mitchellcairns/GrayjayWeb.git   (Git LFS required)
-#   docker compose up -d --build
+# Prebuilt images: ghcr.io/mitchellcairns/grayjayweb (linux/amd64, linux/arm64), built by .github/workflows/docker.yml.
+# To build yourself (Git LFS required):
+#   docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
 #
 # Data (plugins, subscriptions, history, paired devices) lives in /data — mount a volume there.
 # Plugin sign-in (e.g. YouTube) uses the bundled Chromium, streamed to your phone.
 
 # ---------- 1. PWA ----------
-FROM node:22-bookworm-slim AS web
+# Build stages run on the builder's own architecture (fast); only the runtime stage is per target platform.
+FROM --platform=$BUILDPLATFORM node:22-bookworm-slim AS web
 WORKDIR /src/Grayjay.Web.App
 COPY Grayjay.Web.App/package.json Grayjay.Web.App/package-lock.json ./
 RUN npm ci
@@ -15,7 +17,7 @@ COPY Grayjay.Web.App/ ./
 RUN npm run build
 
 # ---------- 2. Server (self-contained .NET publish) ----------
-FROM mcr.microsoft.com/dotnet/sdk:8.0-bookworm-slim AS server
+FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:8.0-bookworm-slim AS server
 ARG TARGETARCH
 WORKDIR /src
 COPY . .

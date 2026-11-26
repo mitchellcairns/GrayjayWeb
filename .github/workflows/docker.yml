@@ -1,0 +1,86 @@
+# [GrayjayWeb] Builds the Docker image and publishes it to GitHub Container Registry:
+#   ghcr.io/mitchellcairns/grayjayweb:latest   (linux/amd64 + linux/arm64)
+name: Docker image
+
+on:
+  push:
+    branches: [web]
+    tags: ["v*"]
+    paths-ignore:
+      - "**.md"
+      - "Grayjay.Web.Tray/**"
+      - "Grayjay.Desktop.CEF/**"
+      - "Grayjay.Desktop.Web/**"
+      - "build-web.ps1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: docker-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  IMAGE: ghcr.io/${{ github.repository_owner }}/grayjayweb
+  LFS_INCLUDE: "Grayjay.ClientServer/deps/linux-x64/**,Grayjay.ClientServer/deps/linux-arm64/**"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Check out (with submodules, without LFS)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          lfs: false
+
+      # Only the Linux binaries (ffmpeg, curl-impersonate) are needed; cache them so LFS bandwidth is used once.
+      - name: List Linux LFS objects
+        run: git lfs ls-files -l --include "$LFS_INCLUDE" | cut -d' ' -f1 | sort > .lfs-ids
+
+      - name: Cache LFS objects
+        uses: actions/cache@v4
+        with:
+          path: .git/lfs
+          key: lfs-linux-${{ hashFiles('.lfs-ids') }}
+
+      - name: Pull Linux LFS objects
+        run: git lfs pull --include "$LFS_INCLUDE"
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Image tags and labels
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=ref,event=tag
+            type=sha,format=short
+          labels: |
+            org.opencontainers.image.title=Grayjay Web
+            org.opencontainers.image.description=Unofficial self-hosted web app (PWA) build of FUTO's Grayjay. Non-commercial use only (Source First License 1.1).
+            org.opencontainers.image.licenses=LicenseRef-SourceFirst-1.1
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

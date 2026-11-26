@@ -419,3 +419,4 @@ Grayjay.Web.App/dev-dist/
 Grayjay.Web.Tray/target/
 out/
 .claude/
+.lfs-ids
