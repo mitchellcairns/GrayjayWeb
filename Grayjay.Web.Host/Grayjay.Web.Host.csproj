@@ -38,4 +38,10 @@
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
     </Content>
   </ItemGroup>
+  <!-- Web mode never uses CEF (sign-in uses the system Chrome/Edge via the remote login browser) or the desktop
+       auto-updater, which Grayjay.Engine/ClientServer pull in transitively. Drop them from the published server (~350 MB). -->
+  <Target Name="TrimDesktopOnlyFiles" AfterTargets="Publish">
+    <RemoveDir Directories="$(PublishDir)cef" />
+    <Delete Files="$(PublishDir)FUTO.Updater.Client.exe;$(PublishDir)FUTO.Updater.Client" ContinueOnError="true" />
+  </Target>
 </Project>

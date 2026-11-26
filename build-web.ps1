@@ -6,14 +6,17 @@
 param(
     [string]$Rid = "win-x64"
 )
-$ErrorActionPreference = "Stop"
+# Native tools write warnings to stderr; rely on exit codes instead of $ErrorActionPreference = "Stop".
+$ErrorActionPreference = "Continue"
 $root = $PSScriptRoot
 $out = Join-Path $root "out/GrayjayWeb-$Rid"
 
 Write-Host "==> Building PWA" -ForegroundColor Cyan
 Push-Location (Join-Path $root "Grayjay.Web.App")
 npm ci
+if ($LASTEXITCODE -ne 0) { throw "npm ci failed" }
 npm run build
+if ($LASTEXITCODE -ne 0) { throw "PWA build failed" }
 Pop-Location
 
 Write-Host "==> Publishing server ($Rid)" -ForegroundColor Cyan

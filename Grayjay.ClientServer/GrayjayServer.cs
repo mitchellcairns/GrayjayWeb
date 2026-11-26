@@ -181,8 +181,11 @@ namespace Grayjay.ClientServer
             else
             {
                 string? staticFilesPath = Utilities.FindDirectory("wwwroot");
-                if (staticFilesPath == null)
+                if (staticFilesPath == null && Web == null)
                     throw new Exception("Failed to find wwwroot.");
+                // [GrayjayWeb] The desktop UI (wwwroot/web) is optional in web mode; the PWA is served from /app instead.
+                if (staticFilesPath != null)
+                {
 
                 Logger.i(nameof(GrayjayServer), $"RunServerAsync: Static files path '" + staticFilesPath + "'.");
                 _app.UseStaticFiles(new StaticFileOptions
@@ -199,6 +202,7 @@ namespace Grayjay.ClientServer
                     context.Response.ContentType = "text/html";
                     return context.Response.SendFileAsync(Path.Combine(staticFilesPath, "web", "index.html"));
                 });
+                }
             }
 
             Logger.i(nameof(GrayjayServer), $"RunServerAsync: MapWhen Websocket.");

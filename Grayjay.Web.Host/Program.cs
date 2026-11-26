@@ -67,7 +67,14 @@ namespace Grayjay.Web.Host
                 }
             });
 
-            server.StartedResetEvent.Wait(cts.Token);
+            // If the server fails before it starts listening, exit (non-zero) instead of waiting forever,
+            // so the tray app can report the failure and restart it.
+            var started = Task.Run(() => server.StartedResetEvent.Wait(cts.Token));
+            if (await Task.WhenAny(started, runTask) == runTask && !server.StartedResetEvent.IsSet)
+            {
+                Logger.e(nameof(Program), "Server stopped before it finished starting.");
+                return Environment.ExitCode == 0 ? 1 : Environment.ExitCode;
+            }
             PrintBanner(server, opts);
 
             await runTask;

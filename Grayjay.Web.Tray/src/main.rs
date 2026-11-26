@@ -300,20 +300,25 @@ fn supervise(server: Arc<Server>, proxy: EventLoopProxy<UserEvent>) {
                 }
             }
 
-            // Wait until it answers, then report running.
+            // Wait until it answers, then report running. If it never answers, say so instead of "Starting…" forever.
             let started = Instant::now();
-            while started.elapsed() < Duration::from_secs(120) {
+            let mut ready = false;
+            while started.elapsed() < Duration::from_secs(90) {
                 if server.quitting.load(Ordering::SeqCst) {
                     return;
                 }
                 if http_status(server.port, "/auth/Status") == Some(200) {
                     let _ = proxy.send_event(UserEvent::Status(Status::Running));
+                    ready = true;
                     break;
                 }
                 if exited(&server) {
                     break;
                 }
                 std::thread::sleep(Duration::from_millis(400));
+            }
+            if !ready && !exited(&server) {
+                let _ = proxy.send_event(UserEvent::Status(Status::Failed("not responding — see Show logs".into())));
             }
 
             // Wait for exit.
@@ -508,7 +513,13 @@ fn auto_launcher() -> Option<auto_launch::AutoLaunch> {
 }
 
 fn load_icon() -> Icon {
-    let img = image::load_from_memory(include_bytes!("../assets/icon.png")).expect("icon").into_rgba8();
+    // Edge-to-edge Grayjay mark (no wordmark) so it stays legible at tray sizes. Windows tray slots are
+    // 16–32 px, so a native 32 px render is sharper there than a downscaled 64 px one.
+    #[cfg(windows)]
+    let bytes: &[u8] = include_bytes!("../assets/icon-32.png");
+    #[cfg(not(windows))]
+    let bytes: &[u8] = include_bytes!("../assets/icon-64.png");
+    let img = image::load_from_memory(bytes).expect("icon").into_rgba8();
     let (w, h) = img.dimensions();
     Icon::from_rgba(img.into_raw(), w, h).expect("icon rgba")
 }
