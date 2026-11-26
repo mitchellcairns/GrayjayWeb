@@ -1,4 +1,4 @@
-import { For, Match, Show, Switch, createMemo, createSignal, onCleanup } from "solid-js";
+import { For, Index, Match, Show, Switch, createMemo, createSignal, onCleanup } from "solid-js";
 import { customDialogs } from "../api";
 import { on } from "../api/socket";
 import Sheet from "../components/Sheet";
@@ -12,8 +12,12 @@ interface RemoteCustomDialog { id: string; name: string; data: any }
  * pairing ("syncConfirm" / "syncStatus"). They're driven by WebSocket events and answered via /dialog/DialogRespondCustom.
  */
 export default function CustomDialogs() {
+  // Each dialog object stays the same for its whole life; only its data changes. (Replacing the object on every
+  // progress update re-mounted the whole sheet, which made the import dialog flicker on every number change.)
   const [dialogs, setDialogs] = createSignal<RemoteCustomDialog[]>([]);
+  const [dataById, setDataById] = createSignal<Record<string, any>>({});
   const known = new Set(["import", "importSubs", "syncConfirm", "syncStatus"]);
+  const setData = (id: string, data: any) => setDataById((m) => ({ ...m, [id]: data ?? {} }));
 
   const offs = [
     on<any>("CustomDialog", (p) => {
@@ -21,9 +25,12 @@ export default function CustomDialogs() {
       const id = d?.id ?? d?.ID ?? p.id;
       const name = d?.name ?? d?.Name;
       if (!id || !known.has(name)) return;
-      setDialogs((list) => [...list.filter((x) => x.id !== id), { id, name, data: d?.data ?? d?.Data ?? {} }]);
+      setData(id, d?.data ?? d?.Data);
+      if (dialogs().some((x) => x.id === id)) return;
+      const dialog: RemoteCustomDialog = { id, name, get data() { return dataById()[id] ?? {}; } };
+      setDialogs((list) => [...list, dialog]);
     }),
-    on<any>("CustomDialogUpdate", (p) => setDialogs((list) => list.map((x) => (x.id === p.id ? { ...x, data: p.payload ?? {} } : x)))),
+    on<any>("CustomDialogUpdate", (p) => { if (p.id) setData(p.id, p.payload); }),
     on<any>("CustomDialogClose", (p) => setDialogs((list) => list.filter((x) => x.id !== p.id))),
   ];
   onCleanup(() => offs.forEach((o) => o()));
@@ -99,14 +106,14 @@ function ImportDialog(props: { dialog: RemoteCustomDialog; act: (a: string, d?: 
           <div class="stack">
             <p class="muted">Choose what to bring over from your backup.</p>
             <div class="list">
-              <For each={options()}>
+              <Index each={options()}>
                 {(o) => (
                   <label class="list-item" style={{ cursor: "pointer" }}>
-                    <input type="checkbox" checked={isPicked(o.ID)} onChange={() => toggle(o.ID)} style={{ width: "20px", height: "20px" }} />
-                    <div class="grow"><div class="title">{prettyName(o)}</div><div class="sub">{o.Count} item{o.Count === 1 ? "" : "s"}</div></div>
+                    <input type="checkbox" checked={isPicked(o().ID)} onChange={() => toggle(o().ID)} style={{ width: "20px", height: "20px" }} />
+                    <div class="grow"><div class="title">{prettyName(o())}</div><div class="sub">{o().Count} item{o().Count === 1 ? "" : "s"}</div></div>
                   </label>
                 )}
-              </For>
+              </Index>
             </div>
             <div class="row" style={{ "justify-content": "flex-end" }}>
               <button class="btn" onClick={() => { props.act("choice", "cancel"); props.dismiss(); }}>Cancel</button>
@@ -127,19 +134,19 @@ function ImportDialog(props: { dialog: RemoteCustomDialog; act: (a: string, d?: 
         <Match when={status() === "importing" || status() === "finished"}>
           <div class="stack">
             <div class="list">
-              <For each={importing()}>
+              <Index each={importing()}>
                 {(o) => (
                   <div class="list-item">
-                    <Show when={o.Imported} fallback={o.Importing ? <div class="spinner" style={{ width: "20px", height: "20px", "border-width": "2px" }} /> : <Icon name="history" size={20} />}>
-                      <Icon name={(o.Exceptions?.length ?? 0) > 0 ? "alert" : "check"} size={20} />
+                    <Show when={o().Imported} fallback={o().Importing ? <div class="spinner" style={{ width: "20px", height: "20px", "border-width": "2px" }} /> : <Icon name="history" size={20} />}>
+                      <Icon name={(o().Exceptions?.length ?? 0) > 0 ? "alert" : "check"} size={20} />
                     </Show>
                     <div class="grow">
-                      <div class="title">{prettyName(o)}</div>
-                      <div class="sub">{o.Imported ? `${o.Count} done${(o.Exceptions?.length ?? 0) > 0 ? ` · ${o.Exceptions!.length} problem${o.Exceptions!.length === 1 ? "" : "s"}` : ""}` : o.Importing ? `${o.Progress ?? 0} of ${o.Count}` : "Waiting"}</div>
+                      <div class="title">{prettyName(o())}</div>
+                      <div class="sub">{o().Imported ? `${o().Count} done${(o().Exceptions?.length ?? 0) > 0 ? ` · ${o().Exceptions!.length} problem${o().Exceptions!.length === 1 ? "" : "s"}` : ""}` : o().Importing ? `${o().Progress ?? 0} of ${o().Count}` : "Waiting"}</div>
                     </div>
                   </div>
                 )}
-              </For>
+              </Index>
             </div>
             <Show when={status() === "importing"}><p class="faint" style={{ "font-size": "13px" }}>{data().ImportStatus ?? "Importing…"} Keep this open; large libraries can take a few minutes.</p></Show>
             <Show when={status() === "finished"}>
@@ -184,15 +191,15 @@ function ImportSubsDialog(props: { dialog: RemoteCustomDialog; act: (a: string, 
             <span class="faint" style={{ "font-size": "13px" }}>{selected().size} selected</span>
           </div>
           <div class="list">
-            <For each={channels()}>
+            <Index each={channels()}>
               {(c) => (
                 <label class="list-item" style={{ cursor: "pointer" }}>
-                  <input type="checkbox" checked={selected().has(c.url ?? c.Url)} onChange={() => props.act("selectSubscription", c.url ?? c.Url)} style={{ width: "20px", height: "20px" }} />
-                  <Avatar src={c.thumbnail ?? c.Thumbnail} name={c.name ?? c.Name} size={36} />
-                  <div class="grow"><div class="title">{c.name ?? c.Name}</div><div class="sub">{c.id?.platform ?? c.ID?.Platform ?? ""}</div></div>
+                  <input type="checkbox" checked={selected().has(c().url ?? c().Url)} onChange={() => props.act("selectSubscription", c().url ?? c().Url)} style={{ width: "20px", height: "20px" }} />
+                  <Avatar src={c().thumbnail ?? c().Thumbnail} name={c().name ?? c().Name} size={36} />
+                  <div class="grow"><div class="title">{c().name ?? c().Name}</div><div class="sub">{c().id?.platform ?? c().ID?.Platform ?? ""}</div></div>
                 </label>
               )}
-            </For>
+            </Index>
           </div>
           <button class="btn accent block" disabled={selected().size === 0} onClick={() => props.act("import")}>
             Subscribe to {selected().size} channel{selected().size === 1 ? "" : "s"}
