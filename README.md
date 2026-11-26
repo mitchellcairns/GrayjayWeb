@@ -16,7 +16,9 @@ A web page can't run Grayjay by itself. Browsers block pages from reading other 
 
 ## Getting started
 
-1. Download a release for your computer and run **Grayjay Web** (the tray app). A Grayjay icon appears in your taskbar or menu bar.
+> Using an AI coding assistant? Point it at [`AGENTS.md`](AGENTS.md): it has step-by-step setup and troubleshooting for desktops, Docker/NAS, bare Linux, Tailscale, WireGuard and reverse proxies.
+
+1. Build the bundle for your computer (see [Building](#building); prebuilt downloads are coming) and run **grayjay-tray**. A Grayjay icon appears in your taskbar or menu bar. On a home server or NAS, use [Docker](#docker-home-servers-nas-wireguard) instead.
 2. Your browser opens with a **pairing QR code**. Scan it with your phone's camera.
 3. On iPhone, tap **Share → Add to Home Screen**. On Android, tap **Install app**. Done.
 

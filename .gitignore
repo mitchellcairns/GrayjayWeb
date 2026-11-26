@@ -420,3 +420,4 @@ Grayjay.Web.Tray/target/
 out/
 .claude/
 .lfs-ids
+.devdata/
