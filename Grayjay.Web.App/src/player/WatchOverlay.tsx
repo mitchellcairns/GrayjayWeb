@@ -52,7 +52,8 @@ export default function WatchOverlay() {
     if (!url) return;
     try {
       if (navigator.share) await navigator.share({ title: v()?.name, url });
-      else { await navigator.clipboard.writeText(url); toast("Link copied"); }
+      else if (navigator.clipboard) { await navigator.clipboard.writeText(url); toast("Link copied"); }
+      else window.prompt("Copy this link", url); // no clipboard API on plain-HTTP addresses
     } catch { }
   };
 

@@ -5,7 +5,12 @@ export const WindowID: string = (() => {
   const key = "gj.windowId";
   let id = sessionStorage.getItem(key);
   if (!id) {
-    id = crypto.randomUUID();
+    // crypto.randomUUID only exists in secure contexts (HTTPS/localhost); plain-HTTP LAN addresses need this fallback.
+    const b = crypto.getRandomValues(new Uint8Array(16));
+    b[6] = (b[6] & 0x0f) | 0x40;
+    b[8] = (b[8] & 0x3f) | 0x80;
+    const h = Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
+    id = `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
     sessionStorage.setItem(key, id);
   }
   return id;
@@ -33,8 +38,14 @@ export function onUnauthorized(l: UnauthorizedListener) {
 
 async function handle(resp: Response): Promise<any> {
   if (resp.status === 401) {
-    unauthorizedListeners.forEach((l) => l());
-    throw new ApiError("Not signed in to this server", 401);
+    let body: any = null;
+    try { body = await resp.json(); } catch { }
+    // Only a missing/expired session signs the app out; a rejected pairing code or password just shows its message.
+    if (!body?.error || body.error === "unauthorized") {
+      unauthorizedListeners.forEach((l) => l());
+      throw new ApiError("Not signed in to this server", 401);
+    }
+    throw new ApiError(body.error, 401);
   }
   if (resp.status === 550) {
     // Grayjay "exception model": plugin/script errors with a human-readable message.
