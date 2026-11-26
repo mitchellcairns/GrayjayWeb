@@ -17,22 +17,38 @@ COPY Grayjay.Web.App/ ./
 RUN npm run build
 
 # ---------- 2. Server (self-contained .NET publish) ----------
+# Only the .NET projects are copied here (never Grayjay.Web.App), so a web-app-only change leaves this whole stage
+# cached; the PWA is added in the final stage instead.
 FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:8.0-bookworm-slim AS server
 ARG TARGETARCH
 WORKDIR /src
-COPY . .
-COPY --from=web /src/Grayjay.Web.App/dist Grayjay.Web.App/dist
-RUN case "$TARGETARCH" in \
-      arm64) RID=linux-arm64 ;; \
-      *)     RID=linux-x64 ;; \
-    esac \
+
+# NuGet restore as its own layer: reruns only when a project file changes.
+COPY Grayjay.Web.Host/Grayjay.Web.Host.csproj Grayjay.Web.Host/
+COPY Grayjay.ClientServer/Grayjay.ClientServer.csproj Grayjay.ClientServer/
+COPY Grayjay.Engine/Grayjay.Engine/Grayjay.Engine.csproj Grayjay.Engine/Grayjay.Engine/
+COPY SyncServer/SyncClient/SyncClient.csproj SyncServer/SyncClient/
+COPY SyncServer/SyncShared/SyncShared.csproj SyncServer/SyncShared/
+COPY JustCef/cs/JustCef.csproj JustCef/cs/
+COPY FUTO.MDNS/FUTO.MDNS/FUTO.MDNS.csproj FUTO.MDNS/FUTO.MDNS/
+RUN RID=$([ "$TARGETARCH" = "arm64" ] && echo linux-arm64 || echo linux-x64) \
+ && dotnet restore Grayjay.Web.Host/Grayjay.Web.Host.csproj -r $RID -p:JustCefSkipRuntimeDownload=true
+
+COPY Grayjay.Web.Host/ Grayjay.Web.Host/
+COPY Grayjay.ClientServer/ Grayjay.ClientServer/
+COPY Grayjay.Engine/ Grayjay.Engine/
+COPY SyncServer/ SyncServer/
+COPY JustCef/ JustCef/
+COPY FUTO.MDNS/ FUTO.MDNS/
+COPY LICENSE.md ./
+RUN RID=$([ "$TARGETARCH" = "arm64" ] && echo linux-arm64 || echo linux-x64) \
  && if head -c 200 "Grayjay.ClientServer/deps/$RID/ffmpeg" | grep -q "git-lfs"; then \
       echo "ERROR: Grayjay.ClientServer/deps/$RID holds Git LFS pointer files, not the real binaries." >&2; \
       echo "Run: git lfs install && git lfs pull --include \"Grayjay.ClientServer/deps/$RID/**\"   then build again." >&2; \
       exit 1; \
     fi \
  && dotnet publish Grayjay.Web.Host/Grayjay.Web.Host.csproj -c Release -r $RID --self-contained true -p:JustCefSkipRuntimeDownload=true -o /out \
- && test -f /out/app/index.html \
+ && test -f /out/GrayjayWebServer \
  && cp LICENSE.md /out/LICENSE.md
 
 # ---------- 3. Runtime ----------
@@ -45,6 +61,8 @@ RUN apt-get update \
  && mkdir -p /data && chown grayjay:grayjay /data
 
 COPY --from=server --chown=grayjay:grayjay /out /opt/grayjay
+# Last, so a web-app-only update is just this small layer.
+COPY --from=web --chown=grayjay:grayjay /src/Grayjay.Web.App/dist /opt/grayjay/app
 
 ENV GRAYJAY_DATA_DIR=/data \
     GRAYJAY_PORT=11338 \
