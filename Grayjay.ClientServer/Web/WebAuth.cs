@@ -492,10 +492,6 @@ namespace Grayjay.ClientServer.Web
                     return;
                 }
                 context.Items["gj_device"] = device;
-                // Sign-in started from the computer running the server opens a real browser window there
-                // instead of a streamed one (flows into RemoteBrowserManager via AsyncLocal).
-                if (device.Method == "local")
-                    RemoteBrowser.RemoteBrowserManager.Ambient.Value = new RemoteBrowser.RemoteBrowserManager.RequestOptions() { Headful = true };
             }
 
             await _next(context);

@@ -39,7 +39,8 @@ namespace Grayjay.ClientServer.RemoteBrowser
     /// </summary>
     public static class YouTubeAccountPicker
     {
-        private static readonly Regex _switcherRegex = new Regex(@"^https?://(www|m)\.youtube\.com/channel_switcher", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        // [GrayjayWeb] Also the account/channel pages YouTube may redirect the switcher to.
+        private static readonly Regex _switcherRegex = new Regex(@"^https?://(www|m)\.youtube\.com/(channel_switcher|account(?:_switcher)?(?:[/?#]|$)|select_site)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
         public static bool IsSwitcherUrl(string? url) => url != null && _switcherRegex.IsMatch(url);
 

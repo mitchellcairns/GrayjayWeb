@@ -1019,27 +1019,32 @@ namespace Grayjay.ClientServer.RemoteBrowser
             var ct = cts.Token;
             _ = Task.Run(async () =>
             {
-                var delays = new[] { initialDelayMs, 2000, 3500 };
+                // [GrayjayWeb] YouTube redirects and re-renders this page a few times; an attempt that races a navigation
+                // ("Inspected target navigated or closed") must not abandon the remaining attempts.
+                var delays = new[] { initialDelayMs, 1500, 2000, 3000, 4000, 6000 };
                 List<YouTubeAccountPicker.Account> accounts = new List<YouTubeAccountPicker.Account>();
-                try
+                foreach (var delay in delays)
                 {
-                    foreach (var delay in delays)
+                    try
                     {
                         await Task.Delay(delay, ct);
-                        if (!YouTubeAccountPicker.IsSwitcherUrl(page.Url) || page != _activePage || _cdp == null)
-                            return;
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        return;
+                    }
+                    if (!YouTubeAccountPicker.IsSwitcherUrl(page.Url) || page != _activePage || _cdp == null)
+                        return;
+                    try
+                    {
                         accounts = await ExtractYouTubeAccountsAsync(page);
                         if (accounts.Count > 0)
                             break;
                     }
-                }
-                catch (OperationCanceledException)
-                {
-                    return;
-                }
-                catch (Exception ex)
-                {
-                    Logger.w(nameof(RemoteBrowserSession), $"[{Id}] YouTube account extraction failed: {ex.Message}");
+                    catch (Exception ex)
+                    {
+                        Logger.w(nameof(RemoteBrowserSession), $"[{Id}] YouTube account extraction attempt failed (will retry): {ex.Message}");
+                    }
                 }
                 if (ct.IsCancellationRequested)
                     return;

@@ -108,9 +108,6 @@ function ImportDialog(props: { dialog: RemoteCustomDialog; act: (a: string, d?: 
                 )}
               </For>
             </div>
-            <Show when={options().some((o) => o.ID === "history")}>
-              <p class="faint" style={{ "font-size": "12px" }}>Note: Grayjay doesn't support importing watch history from backups yet; use Grayjay Sync to bring history over.</p>
-            </Show>
             <div class="row" style={{ "justify-content": "flex-end" }}>
               <button class="btn" onClick={() => { props.act("choice", "cancel"); props.dismiss(); }}>Cancel</button>
               <button class="btn accent" disabled={chosen().length === 0} onClick={() => props.act("choice", "import;" + chosen().join(","))}>Import</button>

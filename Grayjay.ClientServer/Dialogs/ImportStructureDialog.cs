@@ -33,7 +33,7 @@ namespace Grayjay.ClientServer.Dialogs
                 _model.PluginSettings.Count = export.PluginSettings.Count;
 
             foreach (var store in export.Stores)
-                _model.Stores.Add(new ImportDialogOption(store.Key, store.Key.Capitalize(), store.Value.Count));
+                _model.Stores.Add(new ImportDialogOption(store.Key, Web.BackupExtraImporters.Handles(store.Key) ? Web.BackupExtraImporters.DisplayName(store.Key) : store.Key.Capitalize(), store.Value.Count));
         }
 
 
@@ -213,9 +213,40 @@ namespace Grayjay.ClientServer.Dialogs
                 Logger.i(nameof(StateBackup), $"Importing store [{import.ID}]");
                 var store = _export.Stores.FirstOrDefault(x => x.Key == import.ID);
                 if (store.Value == null)
+                {
+                    import.Imported = true;
+                    dialog.UpdateData(_model);
                     continue;
+                }
                 var relevantStore = availableStores.FirstOrDefault(x => x.Name.Equals(store.Key, StringComparison.OrdinalIgnoreCase));
-                if (relevantStore != null)
+                // [GrayjayWeb] Watch later and watch history (Grayjay Android exports) weren't imported upstream, and the
+                // dialog never marked them finished, so the import appeared to hang.
+                if (relevantStore == null && Web.BackupExtraImporters.Handles(store.Key))
+                {
+                    try
+                    {
+                        var extra = await Web.BackupExtraImporters.ImportAsync(store.Key, store.Value, _export.Cache, async (progress, total) =>
+                        {
+                            import.Progress = progress;
+                            _model.ImportStatus = $"Importing {import.Progress} out of {import.Count} items...";
+                            await dialog.UpdateData(_model);
+                        });
+                        import.Warnings.AddRange(extra.Warnings.Distinct().Take(20));
+                        import.Exceptions.AddRange(extra.Errors.Take(50));
+                        Logger.i(nameof(StateBackup), $"Imported {extra.Imported}/{store.Value.Count} from [{store.Key}]");
+                    }
+                    catch (Exception ex)
+                    {
+                        import.Exceptions.Add(ex.Message);
+                        Logger.e(nameof(StateBackup), $"Failed to import [{store.Key}]", ex);
+                    }
+                    finally
+                    {
+                        import.Imported = true;
+                        dialog.UpdateData(_model);
+                    }
+                }
+                else if (relevantStore != null)
                 {
                     try
                     {
@@ -267,13 +298,12 @@ namespace Grayjay.ClientServer.Dialogs
                         dialog.UpdateData(_model);
                     }
                 }
-                else if(store.Key == "history")
-                {
-
-                }
                 else
                 {
                     Logger.w(nameof(StateBackup), $"Unknown store [{import.ID}] import");
+                    import.Warnings.Add("This kind of data can't be imported yet.");
+                    import.Imported = true;
+                    dialog.UpdateData(_model);
                     continue;
                 }
             }
