@@ -28,6 +28,21 @@ export default function RemoteBrowser(props: { session: RemoteBrowserSession; on
   // The stream drops whenever the phone puts the app in the background (approving a sign-in on the phone, copying a
   // 2-step code from another app). The server keeps the session for 15 minutes, so reconnect and carry on.
   const [reconnecting, setReconnecting] = createSignal(false);
+  // The kind of field focused in the page ("username", "password", "code"…). The hidden input copies it so phones
+  // show the right keyboard and offer saved passwords (Google Password Manager, iCloud Keychain, Bitwarden…).
+  const [field, setField] = createSignal("text");
+  const credentialField = () => ["username", "password", "new-password", "code"].includes(field());
+  const fieldLabel = () => ({ username: "Email or username", password: "Password", "new-password": "New password", code: "Code" } as Record<string, string>)[field()] ?? "";
+  const inputAttrs = () => {
+    switch (field()) {
+      case "password": return { type: "password", autocomplete: "current-password", inputmode: undefined, name: "password" };
+      case "new-password": return { type: "password", autocomplete: "new-password", inputmode: undefined, name: "new-password" };
+      case "username": return { type: "email", autocomplete: "username", inputmode: "email", name: "username" };
+      case "code": return { type: "text", autocomplete: "one-time-code", inputmode: "numeric", name: "otp" };
+      case "tel": return { type: "tel", autocomplete: "tel", inputmode: "tel", name: "tel" };
+      default: return { type: "text", autocomplete: "on", inputmode: undefined, name: "text" };
+    }
+  };
   let closedByUs = false;
   // Sign-in started on the computer running Grayjay opens a real browser window there instead of streaming.
   const headful = !!props.session.headful;
@@ -80,6 +95,9 @@ export default function RemoteBrowser(props: { session: RemoteBrowserSession; on
         case "ytAccounts":
           setAccounts(Array.isArray(m.accounts) && m.accounts.length ? m.accounts : null);
           setShowPage(false);
+          break;
+        case "field":
+          setField(m.kind ?? "text");
           break;
         case "closed":
           closedByUs = true;
@@ -284,11 +302,23 @@ export default function RemoteBrowser(props: { session: RemoteBrowserSession; on
           </Show>
         </div>
 
+        {/* Password managers ignore invisible fields, so for sign-in fields the input becomes a visible strip inside a
+            form (what managers look for). Whatever is typed or filled in goes to the page, nothing stays here. */}
+        <form class="rb-keys-form" classList={{ shown: credentialField() && !headful }} onSubmit={(e) => {
+          e.preventDefault();
+          send({ type: "key", action: "down", key: "Enter", code: "Enter", keyCode: 13, modifiers: 0 });
+          send({ type: "key", action: "up", key: "Enter", code: "Enter", keyCode: 13, modifiers: 0 });
+        }}>
+          <Show when={credentialField()}><label class="rb-keys-label" for="rb-keys">{fieldLabel()}</label></Show>
         <input
           ref={keyInput}
+          id="rb-keys"
           class="rb-keys"
-          type="text"
-          autocomplete="on"
+          placeholder={credentialField() ? "Tap to type, or use your password manager" : undefined}
+          type={inputAttrs().type}
+          autocomplete={inputAttrs().autocomplete as any}
+          inputmode={inputAttrs().inputmode as any}
+          name={inputAttrs().name}
           autocapitalize="off"
           autocorrect="off"
           spellcheck={false}
@@ -301,6 +331,7 @@ export default function RemoteBrowser(props: { session: RemoteBrowserSession; on
           onPaste={onPaste}
           value=""
         />
+        </form>
         <footer class="rb-foot faint">
           <Icon name="lock" size={12} /> This page runs on your own Grayjay server. Sign in as you normally would; Grayjay keeps only the session it needs.
         </footer>

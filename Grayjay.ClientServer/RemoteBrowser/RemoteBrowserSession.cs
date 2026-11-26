@@ -85,6 +85,12 @@ namespace Grayjay.ClientServer.RemoteBrowser
         private readonly Dictionary<string, Queue<PendingExtraInfo>> _pendingExtraInfo = new Dictionary<string, Queue<PendingExtraInfo>>();
         private readonly Dictionary<string, PendingRequest> _recentUnpaired = new Dictionary<string, PendingRequest>();
         private Timer? _sweepTimer;
+        // [GrayjayWeb] What kind of field has focus in the page (email, password, one-time code…), so the viewer's
+        // hidden input can match it and phones offer the right keyboard and password-manager autofill.
+        private Timer? _focusTimer;
+        private int _focusCheckRunning;
+        private string? _lastFieldKind;
+        private string? _lastFieldMessage;
         private int _handlerErrors;
 
         private CancellationTokenSource? _ytCts;
@@ -278,6 +284,7 @@ namespace Grayjay.ClientServer.RemoteBrowser
             }
 
             _sweepTimer = new Timer(_ => SweepPendingRequests(), null, 250, 250);
+            _focusTimer = new Timer(_ => _ = CheckFocusedFieldAsync(), null, 1000, 1000);
             IsStarted = true;
             Logger.i(nameof(RemoteBrowserSession), $"[{Id}] Remote browser session ready.");
         }
@@ -880,6 +887,70 @@ namespace Grayjay.ClientServer.RemoteBrowser
 
         #endregion
 
+        #region Focused field
+
+        // Read-only look at document.activeElement (through same-origin iframes and shadow roots). Runs via
+        // Runtime.evaluate without enabling the Runtime domain or adding globals, so the page can't tell.
+        private const string FocusProbeJs = @"(() => {
+  let el = document.activeElement;
+  for (let i = 0; i < 8 && el; i++) {
+    if (el.shadowRoot && el.shadowRoot.activeElement) { el = el.shadowRoot.activeElement; continue; }
+    if (el.tagName === 'IFRAME') { try { const d = el.contentDocument; if (d && d.activeElement) { el = d.activeElement; continue; } } catch (e) {} }
+    break;
+  }
+  if (!el) return 'none';
+  const tag = el.tagName;
+  const editable = el.isContentEditable || tag === 'TEXTAREA' || (tag === 'INPUT' && !/^(button|submit|checkbox|radio|range|file|hidden|image|reset|color)$/i.test(el.type));
+  if (!editable) return 'none';
+  const type = (el.type || '').toLowerCase(), ac = (el.autocomplete || el.getAttribute('autocomplete') || '').toLowerCase();
+  const mode = (el.inputMode || el.getAttribute('inputmode') || '').toLowerCase(), key = ((el.name || '') + ' ' + (el.id || '')).toLowerCase();
+  if (type === 'password' || /password/.test(ac)) return ac.includes('new-password') ? 'new-password' : 'password';
+  if (/one-time-code/.test(ac) || /totp|otp|pin|code/.test(key)) return 'code';
+  if (mode === 'numeric' || mode === 'decimal' || type === 'number') return 'code';
+  if (type === 'email' || /username|email/.test(ac) || /identifier|email|user|login/.test(key)) return 'username';
+  if (type === 'tel') return 'tel';
+  return 'text';
+})()";
+
+        private void ScheduleFocusCheck()
+        {
+            _ = Task.Run(async () =>
+            {
+                await Task.Delay(250);
+                await CheckFocusedFieldAsync();
+            });
+        }
+
+        private async Task CheckFocusedFieldAsync()
+        {
+            if (_closing || ViewerCount == 0 || Interlocked.Exchange(ref _focusCheckRunning, 1) == 1)
+                return;
+            try
+            {
+                var cdp = _cdp;
+                var sid = _activePage?.SessionId;
+                if (cdp == null || sid == null)
+                    return;
+                var res = await cdp.TrySendAsync("Runtime.evaluate", new { expression = FocusProbeJs, returnByValue = true, silent = true }, sid, TimeSpan.FromSeconds(3));
+                var kind = res?.Obj("result")?.Str("value");
+                if (kind == null || kind == _lastFieldKind)
+                    return;
+                _lastFieldKind = kind;
+                var msg = JsonSerializer.Serialize(new { type = "field", kind }, _jsonOptions);
+                _lastFieldMessage = msg;
+                Broadcast(msg);
+            }
+            catch
+            {
+            }
+            finally
+            {
+                Interlocked.Exchange(ref _focusCheckRunning, 0);
+            }
+        }
+
+        #endregion
+
         #region Screencast
 
         private (int maxWidth, int maxHeight) GetScreencastSize()
@@ -1163,6 +1234,8 @@ namespace Grayjay.ClientServer.RemoteBrowser
                 viewer.Enqueue(_lastUrlMessage);
             if (_lastYtMessage != null)
                 viewer.Enqueue(_lastYtMessage);
+            if (_lastFieldMessage != null)
+                viewer.Enqueue(_lastFieldMessage);
             if (_lastFrameMessage != null)
                 viewer.SetFrame(_lastFrameMessage);
 
@@ -1357,6 +1430,7 @@ namespace Grayjay.ClientServer.RemoteBrowser
                     case "cancel":
                         if (!_touches.Remove(id))
                             return;
+                        ScheduleFocusCheck();
                         //Lifting one finger of several: report the remaining ones, Chrome releases the missing point.
                         eventType = _touches.Count == 0 ? (action == "cancel" ? "touchCancel" : "touchEnd") : "touchMove";
                         break;
@@ -1565,6 +1639,7 @@ namespace Grayjay.ClientServer.RemoteBrowser
             Logger.i(nameof(RemoteBrowserSession), $"[{Id}] Closing remote browser session ({reason}).");
             try { _ytCts?.Cancel(); } catch { }
             try { _sweepTimer?.Dispose(); } catch { }
+            try { _focusTimer?.Dispose(); } catch { }
 
             //Report requests that were still waiting for their extra info, so the consumer sees everything before OnClosed.
             try { FlushPendingRequests(); } catch { }
