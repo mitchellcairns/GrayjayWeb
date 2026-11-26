@@ -19,13 +19,13 @@ export default function Home() {
 
   return (
     <>
-      <PageHeader logo actions={<>
+      <PageHeader title="Discover" actions={<>
         <A href="/search" class="icon-btn" aria-label="Search"><Icon name="search" /></A>
         <A href="/settings" class="icon-btn" aria-label="Settings"><Icon name="settings" /></A>
       </>} />
       <main class="page">
         <Show when={enabled.state === "ready" && enabled()!.length === 0} fallback={
-          <Feed pager={pager} empty={<div class="empty"><Icon name="home" /><h3>Your home feed is empty</h3><p>Pull down to refresh, or check your sources.</p></div>} />
+          <Feed pager={pager} empty={<div class="empty"><Icon name="discover" /><h3>Nothing to discover yet</h3><p>Pull down to refresh, or check your sources.</p></div>} />
         }>
           <div class="empty">
             <img src="/app/logo.svg" alt="" width="64" height="64" />

@@ -1,0 +1,28 @@
+# [GrayjayWeb] HTTPS reverse proxy for Grayjay Web (docker compose --profile https up -d).
+#
+# Option A — a real certificate (best: no warnings, installs as an app everywhere):
+#   Point a DNS name at this machine's WireGuard/LAN IP (e.g. grayjay.example.com → 10.8.0.1) and set GRAYJAY_HOST to it.
+#   If the machine is reachable from the internet on port 80/443, Caddy gets a Let's Encrypt certificate automatically.
+#   If it is only reachable over WireGuard, use a DNS challenge instead: build Caddy with your DNS provider's plugin
+#   (e.g. caddy-dns/cloudflare) and add a `tls { dns cloudflare {env.CF_API_TOKEN} }` block below.
+#
+# Option B — self-signed (no domain needed):
+#   Set GRAYJAY_HOST to the WireGuard IP (e.g. 10.8.0.1) and uncomment `tls internal`. Each phone must trust Caddy's
+#   root certificate once. Copy it out with:
+#   docker compose cp caddy:/data/caddy/pki/authorities/local/root.crt ./grayjay-root.crt
+#   (Android: Settings → Security → Install certificate → CA certificate; iPhone: AirDrop/mail it, install the
+#   profile, then Settings → General → About → Certificate Trust Settings → enable full trust).
+
+{$GRAYJAY_HOST} {
+	# tls internal
+
+	encode zstd gzip
+	reverse_proxy grayjay:11338 {
+		# Media and the sign-in browser stream for a long time; don't buffer or time them out.
+		flush_interval -1
+		transport http {
+			read_timeout 0
+			write_timeout 0
+		}
+	}
+}

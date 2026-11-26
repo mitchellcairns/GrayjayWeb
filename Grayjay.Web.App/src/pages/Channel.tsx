@@ -16,7 +16,9 @@ export default function Channel() {
   const [tab, setTab] = createSignal<"videos" | "playlists" | "about">("videos");
 
   const [ch] = createResource(url, (u) => channelApi.load(u));
-  const [subscribed, { mutate }] = createResource(url, (u) => subscriptions.isSubscribed(u).catch(() => false));
+  // Subscriptions are stored under the channel's canonical URL (e.g. /channel/UC…), not the handle URL you may have opened.
+  const canonicalUrl = () => ch()?.url || url();
+  const [subscribed, { mutate }] = createResource(() => (ch.loading ? undefined : canonicalUrl()), (u) => subscriptions.isSubscribed(u).catch(() => false));
   const [canPlaylists] = createResource(url, (u) => channelApi.canGetPlaylists(u).catch(() => false));
 
   const videos = createPager(() => channelApi.contentLoad(url()), () => channelApi.contentNext());
@@ -26,8 +28,8 @@ export default function Channel() {
 
   const toggle = async () => {
     try {
-      if (subscribed()) { await subscriptions.unsubscribe(url()); mutate(false); toast("Unsubscribed"); }
-      else { await subscriptions.subscribe(url()); mutate(true); toast(`Subscribed to ${ch()?.name ?? "channel"}`); }
+      if (subscribed()) { await subscriptions.unsubscribe(canonicalUrl()); mutate(false); toast("Unsubscribed"); }
+      else { await subscriptions.subscribe(canonicalUrl()); mutate(true); toast(`Subscribed to ${ch()?.name ?? "channel"}`); }
     } catch (e) { toastError(e); }
   };
 

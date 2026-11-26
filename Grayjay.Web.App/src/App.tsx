@@ -5,9 +5,10 @@ import { onUnauthorized } from "./api/client";
 import { startSocket } from "./api/socket";
 import Shell from "./shell/Shell";
 import PairScreen from "./pages/Pair";
-import Home from "./pages/Home";
+import Subscriptions from "./pages/Subscriptions";
 
-const Subscriptions = lazy(() => import("./pages/Subscriptions"));
+const Home = lazy(() => import("./pages/Home"));
+const Setup = lazy(() => import("./pages/Setup"));
 const Search = lazy(() => import("./pages/Search"));
 const Library = lazy(() => import("./pages/Library"));
 const Channel = lazy(() => import("./pages/Channel"));
@@ -47,15 +48,17 @@ function AuthedApp(): JSX.Element {
   startSocket();
   return (
     <Router base="/app" root={Shell}>
-      <Route path="/" component={Home} />
+      <Route path="/" component={Subscriptions} />
       <Route path="/subscriptions" component={Subscriptions} />
+      <Route path="/discover" component={Home} />
+      <Route path="/setup" component={Setup} />
       <Route path="/search" component={Search} />
       <Route path="/library" component={Library} />
       <Route path="/channel" component={Channel} />
       <Route path="/sources" component={Sources} />
       <Route path="/settings" component={Settings} />
       <Route path="/share" component={Share} />
-      <Route path="*" component={Home} />
+      <Route path="*" component={Subscriptions} />
     </Router>
   );
 }

@@ -28,6 +28,13 @@ namespace Grayjay.ClientServer.Web
         /// <summary>Disables authentication entirely. Only for setups where a reverse proxy already authenticates.</summary>
         public bool DisableAuth { get; set; } = false;
 
+        /// <summary>
+        /// Addresses phones should use to reach this server (e.g. "https://grayjay.example.com" or "http://10.8.0.1:11338"
+        /// for a WireGuard peer). Shown first in pairing QR codes. Needed in Docker, where the server only sees its
+        /// container network. When set, auto-detected network addresses are not offered.
+        /// </summary>
+        public List<string> PublicUrls { get; set; } = new List<string>();
+
         /// <summary>Path prefix the PWA is served under.</summary>
         public const string AppPath = "/app";
     }

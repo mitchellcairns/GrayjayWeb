@@ -34,9 +34,11 @@ export default function Subscriptions() {
 
   return (
     <>
-      <PageHeader title="Subscriptions" actions={
-        <button class="icon-btn" aria-label="Channels" onClick={() => setChannelsOpen(true)}><Icon name="users" /></button>
-      } />
+      <PageHeader logo actions={<>
+        <button class="icon-btn" aria-label="Your channels" title="Your channels" onClick={() => setChannelsOpen(true)}><Icon name="users" /></button>
+        <A href="/search" class="icon-btn" aria-label="Search"><Icon name="search" /></A>
+        <A href="/settings" class="icon-btn" aria-label="Settings"><Icon name="settings" /></A>
+      </>} />
       <main class="page">
         <Show when={(groups()?.length ?? 0) > 0}>
           <div class="chips" style={{ "margin-bottom": "14px" }}>
@@ -49,7 +51,10 @@ export default function Subscriptions() {
             <Icon name="subs" />
             <h3>No subscriptions yet</h3>
             <p>Subscribe to channels from any source and their new videos show up here, all in one place.</p>
-            <A href="/search" class="btn accent">Find channels</A>
+            <div class="row" style={{ "flex-wrap": "wrap", "justify-content": "center" }}>
+              <A href="/setup" class="btn accent">Import or sync subscriptions</A>
+              <A href="/search" class="btn">Find channels</A>
+            </div>
           </div>
         </Show>
       </main>

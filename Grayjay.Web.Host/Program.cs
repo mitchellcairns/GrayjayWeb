@@ -10,6 +10,8 @@ using Grayjay.ClientServer.Settings;
 using Grayjay.ClientServer.States;
 using Grayjay.ClientServer.Web;
 using Grayjay.Desktop.POC;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
 
 namespace Grayjay.Web.Host
 {
@@ -40,7 +42,12 @@ namespace Grayjay.Web.Host
             // Plugin sign-in and captchas run in a server-side Chromium streamed to the PWA (remote login browser).
             WebWindowProvider.InterceptorFactory = (title, url, userAgent, mobile, injectJs, handler, ct) =>
                 RemoteBrowserManager.CreateInterceptorWindowAsync(title, url, userAgent, mobile, injectJs, handler, ct);
-            GrayjayServer.WebEndpointsHook = app => RemoteBrowserEndpoints.Map(app);
+            GrayjayServer.WebEndpointsHook = app =>
+            {
+                RemoteBrowserEndpoints.Map(app);
+                // Forget remembered sign-in browser profiles (called when signing out of a source).
+                app.MapPost("/RemoteBrowser/ForgetAccounts", () => Results.Json(new { removed = RemoteBrowserManager.ForgetPersistentProfiles() }));
+            };
 
             Logger.i(nameof(Program), "StateApp.Startup");
             await StateApp.Startup();
@@ -87,6 +94,8 @@ namespace Grayjay.Web.Host
             Console.WriteLine();
             Console.WriteLine("  Grayjay Web is running.");
             Console.WriteLine($"  Open:  http://localhost:{opts.Port}{WebHostOptions.AppPath}/");
+            foreach (var url in opts.PublicUrls)
+                Console.WriteLine($"         {url.TrimEnd('/')}{WebHostOptions.AppPath}/");
             foreach (var ip in GetLanAddresses())
                 Console.WriteLine($"         http://{ip}:{opts.Port}{WebHostOptions.AppPath}/");
 
@@ -102,7 +111,8 @@ namespace Grayjay.Web.Host
                 var (code, _) = server.WebAuth.CreatePairingCode("console");
                 Console.WriteLine();
                 Console.WriteLine($"  No devices are paired yet. Pairing code (valid 10 minutes): {code}");
-                Console.WriteLine($"  Or open http://<this-computer>:{opts.Port}{WebHostOptions.AppPath}/#pair={code}");
+                var baseUrl = opts.PublicUrls.FirstOrDefault()?.TrimEnd('/') ?? $"http://<this-computer>:{opts.Port}";
+                Console.WriteLine($"  Or open {baseUrl}{WebHostOptions.AppPath}/#pair={code}");
             }
             Console.WriteLine();
         }
@@ -146,6 +156,8 @@ namespace Grayjay.Web.Host
             opts.LocalSecret = env("GRAYJAY_LOCAL_SECRET");
             opts.DisableAuth = env("GRAYJAY_NO_AUTH") == "1";
             opts.AppRoot = env("GRAYJAY_APP_ROOT");
+            if (env("GRAYJAY_PUBLIC_URLS") is string urls)
+                opts.PublicUrls = urls.Split(new[] { ',', ';', ' ' }, StringSplitOptions.RemoveEmptyEntries).ToList();
 
             for (int i = 0; i < args.Length; i++)
             {
@@ -158,6 +170,7 @@ namespace Grayjay.Web.Host
                     case "--app-root": opts.AppRoot = next(); break;
                     case "--password": opts.Password = next(); break;
                     case "--no-auth": opts.DisableAuth = true; break;
+                    case "--public-url": opts.PublicUrls.Add(next()); break;
                     case "-h":
                     case "--help": showHelp = true; break;
                     default: Console.WriteLine($"Ignoring unknown argument {args[i]}"); break;
@@ -189,6 +202,7 @@ namespace Grayjay.Web.Host
                   --data-dir <dir>   Data directory (default <AppData>/GrayjayWeb, env GRAYJAY_DATA_DIR)
                   --app-root <dir>   Built PWA directory (default ./app, env GRAYJAY_APP_ROOT)
                   --password <pw>    Allow password sign-in in addition to pairing (env GRAYJAY_PASSWORD)
+                  --public-url <url> Address phones use to reach this server; repeatable (env GRAYJAY_PUBLIC_URLS, comma-separated)
                   --no-auth          Disable authentication (only behind an authenticating reverse proxy)
 
                 Env GRAYJAY_LOCAL_SECRET: secret the tray app uses to sign in on this computer via /auth/Local.

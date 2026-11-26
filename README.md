@@ -22,14 +22,46 @@ A web page can't run Grayjay by itself. Browsers block pages from reading other 
 
 **Away from home:** in the tray menu, choose **Remote access → Turn on (Tailscale)**. With free [Tailscale](https://tailscale.com) on both devices you get a private `https://your-pc.your-tailnet.ts.net/app/` address that works anywhere. It also gives you HTTPS, which the full PWA experience (offline shell, wake lock, install prompts) needs.
 
+### Docker (home servers, NAS, WireGuard)
+
+```bash
+git clone --recurse-submodules https://github.com/mitchellcairns/GrayjayWeb.git   # needs Git LFS
+cd GrayjayWeb
+# edit docker-compose.yml: set GRAYJAY_PUBLIC_URLS to the address your phones use (e.g. your WireGuard IP)
+docker compose up -d --build
+docker compose logs grayjay | grep -i "pairing code"   # first device: enter this code on your phone
+```
+
+- The image bundles Chromium for plugin sign-in, ffmpeg, and the PWA; data lives in the `grayjay-data` volume.
+- **WireGuard:** phones on the tunnel reach the server at its WireGuard IP, e.g. `http://10.8.0.1:11338/app/`. Set `GRAYJAY_PUBLIC_URLS=http://10.8.0.1:11338` so pairing QR codes use that address.
+- **HTTPS (needed to install the PWA on phones):** `docker compose --profile https up -d` adds Caddy. Either point a DNS name at the WireGuard IP and get a real certificate (Let's Encrypt, or a DNS challenge if the box isn't public), or use `tls internal` with the IP and trust Caddy's root certificate once on each phone. See `docker/Caddyfile`.
+- Grayjay Sync listens on port 12315 if you want your Grayjay apps to connect directly over the LAN/VPN (it also works through FUTO's relay without it).
+
+### Bringing your data over
+
+The first time you open the app, a short setup offers to:
+- **Sync with Grayjay on another device.** Grayjay Android/Desktop: *Settings → Sync → Link new device*, then scan the QR code. Subscriptions, playlists, watch later and history stay in sync.
+- **Import a Grayjay backup** (the `.zip` from Grayjay Android's *Export*), with a choice of what to import.
+- **Import subscriptions** from YouTube (Google Takeout `subscriptions.csv`) or NewPipe (`.json`).
+- Pick your sources and sign in.
+
+You can come back to it from *Settings → Import & sync*. *Settings* can also download a backup of this server.
+
 ### Signing in to YouTube (including accounts with several channels)
 
-In **Sources → YouTube → Sign in**, Grayjay opens the real Google sign-in page in a browser running on your server and streams it to your phone. You type and tap as normal, and phone keyboards and password managers work. When YouTube asks which channel to use, Grayjay shows a native list of all your channels and brand accounts, so you just tap one.
+In **Sources → YouTube → Sign in**, Grayjay opens the real Google sign-in page:
+- **On the computer running Grayjay**, it opens in its own browser window.
+- **On a phone or another device**, a browser running on the server is streamed to you. You type and tap as normal, and phone keyboards and password managers work.
+
+When YouTube asks which channel to use, Grayjay shows a native list of all your channels and brand accounts, so you just tap one. The sign-in browser remembers your Google account, so signing in again or switching channel later takes a single tap. (A "Sign in with Google" button isn't possible here: Grayjay needs a real YouTube web session, which Google's OAuth doesn't provide.)
 
 ## Features
 
 - Home, Subscriptions (with groups), Search (paste any link to open it), Channels, History
-- One persistent player: swipe down to minimize to a mini-player, Back minimizes, playback never stops while you browse
+- Subscriptions is the home screen. Recommendations live under *Discover*.
+- One persistent player: swipe down or press Back to minimize into a floating mini-player. You can drag it anywhere and resize it from the corner, and its size and position are remembered. It morphs smoothly between full and mini, and playback never stops while you browse.
+- Player controls in the bar: captions, audio track, speed and quality. The playhead seeks smoothly with a time and chapter preview. Speed, volume and caption language are remembered.
+- **SponsorBlock** (enable it in *Sources → YouTube → Settings*): segments are coloured on the seek bar. Each category is skipped automatically or gets a Skip button, per your settings. Return YouTube Dislike and DeArrow are in the same settings.
 - DASH and HLS via Shaka Player, including **ManagedMediaSource on iOS 17.1+**; quality and speed controls; resumes where you left off
 - Native web APIs:
   - Media Session (lock screen and headphone controls)

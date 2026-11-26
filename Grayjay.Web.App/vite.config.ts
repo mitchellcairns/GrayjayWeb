@@ -40,7 +40,7 @@ export default defineConfig({
           params: { title: "title", text: "text", url: "url" },
         },
         shortcuts: [
-          { name: "Subscriptions", url: "/app/subscriptions", icons: [{ src: "pwa-192x192.png", sizes: "192x192" }] },
+          { name: "Discover", url: "/app/discover", icons: [{ src: "pwa-192x192.png", sizes: "192x192" }] },
           { name: "Search", url: "/app/search", icons: [{ src: "pwa-192x192.png", sizes: "192x192" }] },
         ],
       },

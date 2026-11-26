@@ -1,0 +1,49 @@
+# [GrayjayWeb] docker compose up -d --build
+#
+# First run: get the one-time pairing code with   docker compose logs grayjay | grep -i pairing
+# then open http://<server>:11338/app/ on your phone and enter it (or scan a QR code later from Settings → Pair).
+#
+# WireGuard: nothing special is needed — phones on the tunnel reach the server's WireGuard IP. Set
+# GRAYJAY_PUBLIC_URLS to that address so pairing QR codes point there. To install the app on phones you also
+# need HTTPS: enable the "https" profile below (Caddy).
+
+services:
+  grayjay:
+    build: .
+    image: grayjayweb:latest
+    container_name: grayjay
+    restart: unless-stopped
+    ports:
+      - "11338:11338"     # web app + API
+      - "12315:12315"     # Grayjay Sync (optional)
+    volumes:
+      - grayjay-data:/data   # named volume: keeps the container's non-root user able to write
+    environment:
+      # Address(es) your phones use, comma-separated. Examples:
+      #   http://10.8.0.1:11338            (WireGuard IP of this machine)
+      #   https://grayjay.example.com       (with the Caddy https profile)
+      GRAYJAY_PUBLIC_URLS: "http://10.8.0.1:11338"
+      # Optional: also allow signing in with a password (pairing codes always work).
+      # GRAYJAY_PASSWORD: "change-me"
+    shm_size: "512m"      # Chromium (plugin sign-in) needs more than Docker's 64 MB default
+
+  # HTTPS for the PWA (needed to install it on phones). Start with:  docker compose --profile https up -d
+  # Then set GRAYJAY_PUBLIC_URLS above to the https:// address and, if you like, remove grayjay's "ports" so it is
+  # only reachable through Caddy. See docker/Caddyfile for the two certificate options.
+  caddy:
+    image: caddy:2
+    profiles: ["https"]
+    restart: unless-stopped
+    depends_on: [grayjay]
+    ports:
+      - "443:443"
+      - "80:80"
+    environment:
+      GRAYJAY_HOST: "grayjay.example.com"   # a DNS name, or the WireGuard IP (e.g. 10.8.0.1) for a self-signed cert
+    volumes:
+      - ./docker/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+
+volumes:
+  grayjay-data:
+  caddy-data:

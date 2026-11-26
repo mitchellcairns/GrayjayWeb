@@ -1,5 +1,5 @@
 // Typed wrappers for the Grayjay server endpoints used by the PWA.
-import { get, post, del, q } from "./client";
+import { get, post, del, q, upload } from "./client";
 
 export interface PagerResult<T> { pagerID?: string; results: T[]; hasMore: boolean; exception?: any }
 
@@ -190,7 +190,36 @@ export const dialogs = {
 };
 
 // ---------- Remote login browser ----------
-export interface RemoteBrowserSession { id: string; title: string; url: string; width: number; height: number; mobile: boolean }
+export interface RemoteBrowserSession { id: string; title: string; url: string; width: number; height: number; mobile: boolean; headful?: boolean }
 export const remoteBrowser = {
   sessions: () => get<RemoteBrowserSession[]>("/RemoteBrowser/Sessions"),
+  /** Deletes remembered sign-in browser profiles on the server (called on sign-out). */
+  forgetAccounts: () => post("/RemoteBrowser/ForgetAccounts"),
+};
+
+// ---------- First-run setup, import & Grayjay Sync ----------
+export interface SetupStatus { done: boolean; subscriptions: number; enabledSources: number; installedSources: number; syncEnabled: boolean; syncDevices: number }
+export const setup = {
+  status: () => get<SetupStatus>("/web/setup/Status"),
+  complete: () => post("/web/setup/Complete"),
+  /** Grayjay backup (.zip exported from Grayjay Android/Desktop). Progress arrives as the "import" custom dialog. */
+  importBackup: (file: Blob) => upload<{ ok: boolean; stores?: Record<string, number>; plugins: number }>("/web/import/Backup", file),
+  /** NewPipe subscriptions export (.json). Continues in the "importSubs" custom dialog. */
+  importNewPipe: (file: Blob) => upload<{ ok: boolean; count: number }>("/web/import/NewPipe", file),
+  /** Channel URLs (e.g. parsed from a YouTube Takeout subscriptions.csv). Continues in the "importSubs" dialog. */
+  importSubscriptionUrls: (urls: string[]) => post<boolean>("/Import/ImportSubscriptions", urls),
+};
+
+export interface SyncDevice { publicKey: string; displayName?: string; metadata?: string; linkType?: number }
+export const sync = {
+  enable: () => post<{ ok: boolean; pairingUrl: string }>("/web/sync/Enable"),
+  pairingUrl: () => get<string>("/Sync/GetPairingUrl"),
+  devices: () => get<SyncDevice[]>("/Sync/GetDevices"),
+  status: () => get<{ serverSocketStarted: boolean; relayConnected: boolean; serverSocketFailedToStart: boolean }>("/Sync/Status"),
+  remove: (publicKey: string) => get(`/Sync/RemoveDevice?publicKey=${q(publicKey)}`),
+};
+
+/** Server-driven "custom dialogs" (import progress, subscription import, sync pairing confirmation). */
+export const customDialogs = {
+  action: (id: string, action: string, data: unknown = null) => post(`/dialog/DialogRespondCustom?id=${q(id)}&actionName=${q(action)}`, data),
 };

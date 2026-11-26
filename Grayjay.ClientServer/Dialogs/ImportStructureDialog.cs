@@ -196,7 +196,7 @@ namespace Grayjay.ClientServer.Dialogs
             }
 
 
-            var enabledBefore = StatePlatform.GetEnabledClients().Select(x => x.ID);
+            var enabledBefore = StatePlatform.GetEnabledClients().Select(x => x.ID).ToList();
             if (enablePlugins)
             {
                 var availableClients = StatePlatform.GetAvailableClients();
@@ -277,7 +277,15 @@ namespace Grayjay.ClientServer.Dialogs
                     continue;
                 }
             }
-            await StatePlatform.SelectClients(enabledBefore.ToArray());
+            // [GrayjayWeb] When the user chose to enable the imported sources, keep them enabled afterwards
+            // (previously the pre-import selection was always restored, leaving imported sources disabled).
+            if (enablePlugins)
+            {
+                var keep = enabledBefore.Concat(_export.Plugins.Keys.Where(id => StatePlugins.HasPlugin(id))).Distinct().ToArray();
+                await StatePlatform.SelectClients(keep);
+            }
+            else
+                await StatePlatform.SelectClients(enabledBefore.ToArray());
 
             _model.Status = "finished";
             await dialog.UpdateData(_model);

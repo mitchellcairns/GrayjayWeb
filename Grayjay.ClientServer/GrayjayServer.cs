@@ -138,6 +138,7 @@ namespace Grayjay.ClientServer
                 _app.MapGet("/", () => Results.Redirect(WebHostOptions.AppPath + "/"));
                 WebAuth!.MapEndpoints(_app);
                 WebProxyForwarder.Map(_app);
+                WebSetupEndpoints.Map(_app);
                 MapWebApp(_app, Web);
                 WebEndpointsHook?.Invoke(_app);
             }

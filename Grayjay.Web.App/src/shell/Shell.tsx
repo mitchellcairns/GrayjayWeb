@@ -1,5 +1,7 @@
-import { JSX, Suspense, createEffect, on } from "solid-js";
-import { A, useLocation, useSearchParams } from "@solidjs/router";
+import { JSX, Suspense, createEffect, on, onMount } from "solid-js";
+import { A, useLocation, useNavigate, useSearchParams } from "@solidjs/router";
+import { setup } from "../api";
+import CustomDialogs from "./CustomDialogs";
 import Icon from "../components/Icon";
 import Toasts from "../components/Toasts";
 import WatchOverlay from "../player/WatchOverlay";
@@ -9,8 +11,8 @@ import RemoteBrowserHost from "../remote/RemoteBrowserHost";
 import UpdatePrompt from "./UpdatePrompt";
 
 const tabs = [
-  { href: "/", icon: "home", label: "Home", end: true },
-  { href: "/subscriptions", icon: "subs", label: "Subscriptions" },
+  { href: "/", icon: "subs", label: "Subscriptions", end: true },
+  { href: "/discover", icon: "discover", label: "Discover" },
   { href: "/search", icon: "search", label: "Search" },
   { href: "/library", icon: "library", label: "Library" },
   { href: "/sources", icon: "sources", label: "Sources" },
@@ -19,6 +21,18 @@ const tabs = [
 export default function Shell(props: { children?: JSX.Element }) {
   const [params, setParams] = useSearchParams();
   const location = useLocation();
+  const navigate = useNavigate();
+  // useLocation() includes the router base (/app); compare against the app-relative path.
+  const path = () => location.pathname.replace(/^\/app(?=\/|$)/, "") || "/";
+
+  // New server with nothing in it yet: start the setup wizard (import/sync, sources, sign-in).
+  onMount(async () => {
+    try {
+      const s = await setup.status();
+      if (!s.done && s.subscriptions === 0 && !/^\/(setup|share)/.test(path()) && !params.watch) navigate("/setup", { replace: true });
+    } catch { }
+  });
+  const isSetup = () => path().startsWith("/setup");
 
   // ?watch=<url> opens the full-screen player; Back minimizes it.
   player.bindNavigation({
@@ -38,7 +52,7 @@ export default function Shell(props: { children?: JSX.Element }) {
 
       <WatchOverlay />
 
-      <nav class="tabbar" aria-label="Main">
+      <nav class="tabbar" aria-label="Main" hidden={isSetup()}>
         <A href="/" class="rail-logo" aria-label="Home"><img src="/app/logo.svg" alt="" width="30" height="30" /></A>
         {tabs.map((t) => (
           <A href={t.href} end={t.end} class="tab" activeClass="active">
@@ -51,6 +65,7 @@ export default function Shell(props: { children?: JSX.Element }) {
 
       <Toasts />
       <ServerDialogs />
+      <CustomDialogs />
       <RemoteBrowserHost />
       <UpdatePrompt />
     </>
