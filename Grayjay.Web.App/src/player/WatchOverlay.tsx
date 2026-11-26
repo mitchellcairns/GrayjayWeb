@@ -1,6 +1,6 @@
 import { For, Show, createEffect, createResource, createSignal, on, onCleanup, onMount } from "solid-js";
 import { useNavigate } from "@solidjs/router";
-import { ContentType, details, subscriptions } from "../api";
+import { Content, ContentType, details, subscriptions } from "../api";
 import { bestThumbnail, formatAgo, formatCount, formatViews, joinDot } from "../lib/format";
 import { createPager } from "../lib/pager";
 import { channelHref } from "../lib/nav";
@@ -67,6 +67,11 @@ export default function WatchOverlay() {
 
   let gesture: { kind: "drag" | "resize"; startX: number; startY: number; start: MiniRect; moved: boolean; anchorRight: boolean } | null = null;
   let lastMiniTap = 0, hideMini: number | undefined;
+  // A tap on the mini-player first only shows its controls; its buttons react only once they're visible (so the tap
+  // that reveals them can't also pause, expand or close).
+  let miniShownAt = 0;
+  createEffect(on(miniControls, (on) => { if (on) miniShownAt = performance.now(); }));
+  const miniTapOk = () => miniControls() && performance.now() - miniShownAt > 350;
   const showMiniControls = () => { setMiniControls(true); clearTimeout(hideMini); hideMini = window.setTimeout(() => setMiniControls(false), 2800); };
   const onMiniDown = (kind: "drag" | "resize") => (e: PointerEvent) => {
     if (e.button !== 0) return;
@@ -165,10 +170,23 @@ export default function WatchOverlay() {
 
   // Queue first, then the top Up next suggestion.
   const nextItem = () => queue.items()[0] ?? shownRecs()[0];
+  const current = () => (v() ?? player.preview()) as Content | null;
   const playNext = () => {
     const q = queue.shift();
     const next = q ?? shownRecs()[0];
-    if (next) player.playNow(next.url, next);
+    if (!next) return;
+    const cur = current();
+    if (cur?.url) queue.setPrevious(cur); // one step back stays possible
+    player.playNow(next.url, next);
+  };
+  // Back to the video before the last Next; the one you skipped goes back to the front of the queue.
+  const playPrevious = () => {
+    const prev = queue.previous();
+    if (!prev) return;
+    const cur = current();
+    queue.setPrevious(null);
+    if (cur?.url && cur.url !== prev.url) queue.addNext(cur);
+    player.playNow(prev.url, prev);
   };
 
   // Swipe the player down to minimize (touch).
@@ -219,6 +237,8 @@ export default function WatchOverlay() {
             error={player.error()}
             onEnded={playNext}
             onNext={nextItem() ? playNext : undefined}
+            onPrevious={queue.previous() && queue.previous()!.url !== player.url() ? playPrevious : undefined}
+            previousTitle={queue.previous()?.name}
             nextTitle={nextItem()?.name}
           />
         </div>
@@ -227,14 +247,15 @@ export default function WatchOverlay() {
         <Show when={mode() === "mini"}>
           <div class="mini-surface" classList={{ on: miniControls() }}
             onPointerDown={onMiniDown("drag")} onPointerMove={onMiniMove} onPointerUp={onMiniUp} onPointerCancel={onMiniUp}
-            onMouseEnter={() => setMiniControls(true)} onMouseLeave={() => { if (!gesture) setMiniControls(false); }}>
+            onPointerEnter={(e) => { if (e.pointerType === "mouse") setMiniControls(true); }}
+            onPointerLeave={(e) => { if (e.pointerType === "mouse" && !gesture) setMiniControls(false); }}>
             <div class="mini-controls">
-              <button class="mini-btn" aria-label="Expand player" title="Expand" onPointerDown={(e) => e.stopPropagation()} onClick={() => player.expand()}><Icon name="up" /></button>
+              <button class="mini-btn" aria-label="Expand player" title="Expand" onPointerDown={(e) => e.stopPropagation()} onClick={() => { if (miniTapOk()) player.expand(); }}><Icon name="up" /></button>
               <div class="spacer" />
-              <button class="mini-btn" aria-label="Close player" title="Close" onPointerDown={(e) => e.stopPropagation()} onClick={() => player.close()}><Icon name="close" /></button>
+              <button class="mini-btn" aria-label="Close player" title="Close" onPointerDown={(e) => e.stopPropagation()} onClick={() => { if (miniTapOk()) player.close(); }}><Icon name="close" /></button>
             </div>
             <button class="mini-play" aria-label={player.playing() ? "Pause" : "Play"} onPointerDown={(e) => e.stopPropagation()}
-              onClick={() => { const el = player.videoEl(); el && (el.paused ? el.play() : el.pause()); showMiniControls(); }}>
+              onClick={() => { if (!miniTapOk()) { showMiniControls(); return; } const el = player.videoEl(); el && (el.paused ? el.play() : el.pause()); showMiniControls(); }}>
               <Icon name={player.playing() ? "pause" : "play"} filled size={28} />
             </button>
             <div class="mini-title-bar">{meta()?.name}</div>

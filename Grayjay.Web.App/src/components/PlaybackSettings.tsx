@@ -3,6 +3,7 @@ import { QUALITY_STEPS, QualityPref, detectedConnection, measureSpeed, qualityPr
 import { formatAgo } from "../lib/format";
 import Icon from "./Icon";
 import { toastError } from "./Toasts";
+import { prefs } from "../player/store";
 
 function QualitySelect(props: { value: QualityPref; onChange: (v: QualityPref) => void; allowSame?: boolean }) {
   return (
@@ -46,6 +47,14 @@ export default function PlaybackSettings() {
           <div class="sub wrap">Detected: {conn.label}.{conn.kind === null ? " Turn this on when you're on mobile data (e.g. on iPhone)." : ""}</div>
         </div>
         <span class="switch"><input type="checkbox" checked={qualityPrefs.forceMetered()} onChange={(e) => qualityPrefs.setForceMetered(e.currentTarget.checked)} /><span /></span>
+      </label>
+      <label class="list-item" style={{ cursor: "pointer" }}>
+        <Icon name="pip" />
+        <div class="grow">
+          <div class="title">Pop out when leaving the app</div>
+          <div class="sub wrap">Keeps the video playing in a small floating window when you go home or switch apps. On Android this works from fullscreen.</div>
+        </div>
+        <span class="switch"><input type="checkbox" checked={prefs.popOut()} onChange={(e) => prefs.setPopOut(e.currentTarget.checked)} /><span /></span>
       </label>
       <div class="list-item">
         <Icon name="refresh" />

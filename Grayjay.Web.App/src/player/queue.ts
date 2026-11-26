@@ -16,6 +16,11 @@ function slim(c: Content): Content {
 
 export const queue = createRoot(() => {
   const [items, setLocal] = stored<Content[]>("gj.queue", []);
+  /**
+   * The video you were on before the last Next (one step only): Previous goes back to it. Pressing Next again replaces
+   * it, so an accidental skip is always undoable but the history doesn't pile up.
+   */
+  const [previous, setPreviousRaw] = stored<Content | null>("gj.queue.previous", null);
   let pushTimer: number | undefined;
   let pending = false;
 
@@ -45,6 +50,8 @@ export const queue = createRoot(() => {
   const remove = (url: string) => { if (has(url)) setItems(items().filter((i) => i.url !== url)); };
   return {
     items,
+    previous,
+    setPrevious: (c: Content | null) => setPreviousRaw(c ? slim(c) : null),
     has,
     count: () => items().length,
     add(c: Content) { if (!has(c.url)) setItems([...items(), slim(c)]); },

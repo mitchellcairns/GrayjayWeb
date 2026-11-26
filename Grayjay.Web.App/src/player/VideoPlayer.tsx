@@ -84,6 +84,9 @@ export default function VideoPlayer(props: {
   /** Skip to the next queued / Up next video (also the lock-screen "next" button). */
   onNext?: () => void;
   nextTitle?: string;
+  /** Back to the video before the last Next. */
+  onPrevious?: () => void;
+  previousTitle?: string;
 }) {
   let container!: HTMLDivElement;
   let el!: HTMLVideoElement;
@@ -357,7 +360,8 @@ export default function VideoPlayer(props: {
   createEffect(on(() => props.mini, (m) => { if (m && appFs()) setAppFullscreen(false); }));
 
   const toggleFullscreen = async () => {
-    if (appFullscreenMode) { await setAppFullscreen(!appFs()); return; }
+    // With "Pop out when leaving the app" on, Android only pops out a video that's in real (Fullscreen API) fullscreen.
+    if (appFullscreenMode && (appFs() || !prefs.popOut())) { await setAppFullscreen(!appFs()); return; }
     const d = document as any;
     if (document.fullscreenElement || d.webkitFullscreenElement) {
       await (document.exitFullscreen?.() ?? d.webkitExitFullscreen?.());
@@ -409,12 +413,23 @@ export default function VideoPlayer(props: {
     set("seekto", (d) => { if (d.seekTime != null) seekTo(d.seekTime); });
     set("stop", () => player.close());
     set("nexttrack", props.onNext ? () => props.onNext!() : null);
-    set("previoustrack", () => seekTo(0));
+    // Automatic picture-in-picture when you switch away (Chrome/Edge desktop call this; others ignore it).
+    set("enterpictureinpicture" as MediaSessionAction, prefs.popOut() && !prefs.audioOnly()
+      ? async () => { try { await el.requestPictureInPicture(); } catch { } } : null);
+    // Like a music player: restart this video, or (in its first seconds) go back to the previous one.
+    set("previoustrack", () => { if (props.onPrevious && el.currentTime < 5) props.onPrevious(); else seekTo(0); });
   });
   const updatePositionState = () => {
     if (!("mediaSession" in navigator) || !isFinite(el.duration) || el.duration <= 0) return;
     try { navigator.mediaSession.setPositionState({ duration: el.duration, position: Math.min(el.currentTime, el.duration), playbackRate: el.playbackRate }); } catch { }
   };
+
+  // Safari (iPhone/iPad/Mac) and installed Chrome apps: pop out on their own when you leave while it plays.
+  createEffect(() => {
+    const on = prefs.popOut() && !prefs.audioOnly();
+    (el as any).autoPictureInPicture = on;
+    el.toggleAttribute("autopictureinpicture", on);
+  });
 
   // ---------- Screen Wake Lock while playing ----------
   let wakeLock: any = null;
@@ -463,6 +478,7 @@ export default function VideoPlayer(props: {
       case "i": togglePip(); break;
       case "a": toggleAudioOnly(); break;
       case "N": props.onNext?.(); break;
+      case "P": props.onPrevious?.(); break;
       case ">": setSpeed(SPEEDS[Math.min(SPEEDS.length - 1, SPEEDS.indexOf(rate()) + 1)] ?? 1); break;
       case "<": setSpeed(SPEEDS[Math.max(0, SPEEDS.indexOf(rate()) - 1)] ?? 1); break;
       case "Escape": if (menu()) setMenu(null); break;
@@ -691,6 +707,11 @@ export default function VideoPlayer(props: {
               </span>
               <div class="spacer" />
 
+              <Show when={props.onPrevious}>
+                <button class="icon-btn" aria-label="Previous video" title={props.previousTitle ? `Back to: ${props.previousTitle} (Shift+P)` : "Previous (Shift+P)"} onClick={() => { props.onPrevious!(); poke(); }}>
+                  <Icon name="previous" />
+                </button>
+              </Show>
               <Show when={props.onNext}>
                 <button class="icon-btn" aria-label="Next video" title={props.nextTitle ? `Next: ${props.nextTitle} (Shift+N)` : "Next (Shift+N)"} onClick={() => { props.onNext!(); poke(); }}>
                   <Icon name="skip" />

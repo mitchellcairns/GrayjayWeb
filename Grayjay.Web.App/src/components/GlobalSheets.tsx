@@ -81,7 +81,7 @@ function QueueRow(props: {
       </button>
       <button class="queue-open" onClick={play} aria-label={`Play ${props.item.name}`}>
         <div class="queue-thumb">
-          <Show when={bestThumbnail(props.item.thumbnails, 320)}><img src={bestThumbnail(props.item.thumbnails, 320)} alt="" loading="lazy" referrerpolicy="no-referrer" draggable={false} /></Show>
+          <Show when={bestThumbnail(props.item.thumbnails, 320)}><img src={bestThumbnail(props.item.thumbnails, 320)} alt="" decoding="async" referrerpolicy="no-referrer" draggable={false} /></Show>
           <Show when={props.item.duration}><span class="badge">{formatDuration(props.item.duration)}</span></Show>
         </div>
         <div class="queue-text">
@@ -197,6 +197,18 @@ function QueueSheet() {
           <span class="faint">Now playing</span>
           <div class="title">{now()?.name}</div>
           <div class="sub">{joinDot(now()?.author?.name)}</div>
+        </div>
+      </Show>
+      <Show when={queue.previous() && queue.previous()!.url !== player.url()}>
+        <div class="queue-prev">
+          <span class="faint">Before this</span>
+          <div class="queue-prev-title">{queue.previous()!.name}</div>
+          <button class="btn small" onClick={() => {
+            const prev = queue.previous()!; const cur = player.video() ?? player.preview();
+            queue.setPrevious(null);
+            if (cur?.url && cur.url !== prev.url) queue.addNext(cur as Content);
+            player.playNow(prev.url, prev);
+          }}><Icon name="previous" size={16} /> Back</button>
         </div>
       </Show>
       <Show when={queue.count() > 0} fallback={

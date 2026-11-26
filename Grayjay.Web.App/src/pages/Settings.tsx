@@ -66,7 +66,7 @@ export default function Settings() {
           </For>
         </div>
 
-        <h2 class="section-title">Playback quality <span class="faint" style={{ "font-size": "13px", "font-weight": 500 }}>this device</span></h2>
+        <h2 class="section-title">Playback <span class="faint" style={{ "font-size": "13px", "font-weight": 500 }}>this device</span></h2>
         <PlaybackSettings />
 
         <h2 class="section-title">Feeds <span class="faint" style={{ "font-size": "13px", "font-weight": 500 }}>this device</span></h2>

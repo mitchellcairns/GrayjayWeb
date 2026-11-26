@@ -22,7 +22,9 @@ function createPrefs() {
   const [muted, setMuted] = stored("gj.muted", false);
   /** Audio only: fetch no video (saves data, lets the screen turn off). Remembered, so a podcast queue stays audio. */
   const [audioOnly, setAudioOnly] = stored("gj.audioOnly", false);
-  return { rate, setRate, captions, setCaptions, mini, setMini, volume, setVolume, muted, setMuted, audioOnly, setAudioOnly };
+  /** Picture-in-picture automatically when you leave the app (or tab) while a video plays. */
+  const [popOut, setPopOut] = stored("gj.popOutOnLeave", true);
+  return { rate, setRate, captions, setCaptions, mini, setMini, volume, setVolume, muted, setMuted, audioOnly, setAudioOnly, popOut, setPopOut };
 }
 export const prefs = createRoot(createPrefs);
 
