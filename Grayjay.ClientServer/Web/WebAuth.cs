@@ -393,6 +393,11 @@ namespace Grayjay.ClientServer.Web
                 add("Configured address", origin, origin.StartsWith("https://", StringComparison.OrdinalIgnoreCase));
             }
 
+            // Tailscale Serve (HTTPS with a real certificate: the address phones can install the app from).
+            var tailscaleOrigin = TailscaleInfo.ServeOrigin(_options.Port);
+            if (tailscaleOrigin != null)
+                add("Tailscale (HTTPS)", tailscaleOrigin, true);
+
             var host = ctx.Request.Host.Host;
             bool requestIsLoopback = host == "localhost" || (IPAddress.TryParse(host, out var hostIp) && IPAddress.IsLoopback(hostIp));
             if (!requestIsLoopback)

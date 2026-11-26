@@ -31,7 +31,19 @@ enum Status {
 enum UserEvent {
     Menu(MenuEvent),
     Status(Status),
-    Remote(Option<String>),
+    Remote(Remote),
+}
+
+/// Where remote access (Tailscale Serve) stands, from "not installed" to "on".
+#[derive(Debug, Clone, PartialEq)]
+enum Remote {
+    NotInstalled,
+    /// Installed, but logged out or disconnected (BackendState other than "Running").
+    NotConnected(String),
+    /// Connected, but HTTPS certificates are off for the tailnet, so Serve can't get a certificate.
+    NoHttps { dns: String },
+    Off { dns: String },
+    On { url: String },
 }
 
 struct Server {
@@ -161,9 +173,18 @@ fn main() {
 
     supervise(server.clone(), proxy.clone());
     refresh_remote(server.port, proxy.clone());
+    // Re-check now and then: Tailscale may be installed, signed in or reconfigured while the tray runs.
+    {
+        let port = server.port;
+        let proxy = proxy.clone();
+        std::thread::spawn(move || loop {
+            std::thread::sleep(Duration::from_secs(20));
+            refresh_remote(port, proxy.clone());
+        });
+    }
 
     let mut tray: Option<TrayIcon> = None;
-    let mut remote_url: Option<String> = None;
+    let mut remote = Remote::NotInstalled;
     let mut opened_once = false;
 
     event_loop.run(move |event, _, control_flow| {
@@ -199,34 +220,23 @@ fn main() {
                     }
                 }
             }
-            Event::UserEvent(UserEvent::Remote(url)) => {
-                remote_url = url.clone();
-                match tailscale_exe() {
-                    None => {
-                        remote_status.set_text("Tailscale isn't installed");
-                        remote_on.set_text("Install Tailscale…");
-                        remote_on.set_enabled(true);
-                        remote_off.set_enabled(false);
-                        remote_copy.set_enabled(false);
-                    }
-                    Some(_) => {
-                        remote_on.set_text("Turn on (Tailscale)");
-                        match &url {
-                            Some(u) => {
-                                remote_status.set_text(format!("On: {u}"));
-                                remote_on.set_enabled(false);
-                                remote_off.set_enabled(true);
-                                remote_copy.set_enabled(true);
-                            }
-                            None => {
-                                remote_status.set_text("Off — works on your home network only");
-                                remote_on.set_enabled(true);
-                                remote_off.set_enabled(false);
-                                remote_copy.set_enabled(false);
-                            }
-                        }
-                    }
+            Event::UserEvent(UserEvent::Remote(state)) => {
+                if state == remote {
+                    return;
                 }
+                remote = state;
+                let (status, action, on, off, open) = match &remote {
+                    Remote::NotInstalled => ("Tailscale isn't installed".to_string(), "Install Tailscale…", true, false, false),
+                    Remote::NotConnected(s) => (format!("Tailscale isn't connected ({s}): open it and sign in"), "Open Tailscale…", true, false, false),
+                    Remote::NoHttps { dns } => (format!("One step left for {dns}: turn on HTTPS certificates"), "Turn on HTTPS certificates…", true, false, false),
+                    Remote::Off { dns } => (format!("Off. This PC is {dns}"), "Turn on (Tailscale)", true, false, false),
+                    Remote::On { url } => (format!("On: {url}"), "Turn on (Tailscale)", false, true, true),
+                };
+                remote_status.set_text(status);
+                remote_on.set_text(action);
+                remote_on.set_enabled(on);
+                remote_off.set_enabled(off);
+                remote_copy.set_enabled(open);
             }
             Event::UserEvent(UserEvent::Menu(e)) => {
                 let id = e.id;
@@ -235,17 +245,26 @@ fn main() {
                 } else if id == pair_item.id() {
                     let _ = open::that(server.local_url("/app/settings?pair=1"));
                 } else if id == remote_on.id() {
-                    if tailscale_exe().is_none() {
-                        let _ = open::that("https://tailscale.com/download");
-                    } else {
-                        let port = server.port;
-                        let proxy = proxy.clone();
-                        std::thread::spawn(move || {
-                            if let Err(err) = tailscale_serve(port, true) {
-                                show_error(&format!("Couldn't turn on remote access:\n\n{err}\n\nMake sure Tailscale is running and you're signed in, and that HTTPS certificates are enabled for your tailnet."));
-                            }
-                            refresh_remote(port, proxy);
-                        });
+                    match &remote {
+                        Remote::NotInstalled => {
+                            let _ = open::that("https://tailscale.com/download");
+                        }
+                        Remote::NotConnected(_) => open_tailscale_app(),
+                        Remote::NoHttps { .. } => {
+                            // Admin console → DNS → HTTPS Certificates → Enable (MagicDNS must be on too).
+                            let _ = open::that("https://login.tailscale.com/admin/dns");
+                            show_info("In the Tailscale admin console that just opened, under DNS: make sure MagicDNS is on, then click Enable under HTTPS Certificates.\n\nThen come back and choose Remote access → Turn on. Grayjay notices the change within about 20 seconds.");
+                        }
+                        Remote::Off { .. } | Remote::On { .. } => {
+                            let port = server.port;
+                            let proxy = proxy.clone();
+                            std::thread::spawn(move || {
+                                if let Err(err) = tailscale_serve(port, true) {
+                                    show_error(&format!("Couldn't turn on remote access:\n\n{err}"));
+                                }
+                                refresh_remote(port, proxy);
+                            });
+                        }
                     }
                 } else if id == remote_off.id() {
                     let port = server.port;
@@ -255,8 +274,8 @@ fn main() {
                         refresh_remote(port, proxy);
                     });
                 } else if id == remote_copy.id() {
-                    if let Some(u) = &remote_url {
-                        let _ = open::that(u);
+                    if let Remote::On { url } = &remote {
+                        let _ = open::that(url);
                     }
                 } else if id == remote_help.id() {
                     let _ = open::that("https://tailscale.com/kb/1312/serve");
@@ -404,39 +423,143 @@ fn tailscale_cmd() -> Option<Command> {
     Some(c)
 }
 
-/// Uses `tailscale serve` to publish the server at https://<machine>.<tailnet>.ts.net with a real certificate.
-fn tailscale_serve(port: u16, on: bool) -> Result<(), String> {
-    let mut cmd = tailscale_cmd().ok_or("Tailscale isn't installed")?;
-    if on {
-        cmd.args(["serve", "--bg", "--https=443", &format!("http://127.0.0.1:{port}")]);
-    } else {
-        cmd.args(["serve", "--https=443", "off"]);
+/// Runs a tailscale command, giving up after `timeout` (some commands wait for approval in a browser). Returns
+/// (finished, success, stdout, stderr).
+fn run_tailscale(args: &[&str], timeout: Duration) -> Result<(bool, bool, String, String), String> {
+    let mut child = tailscale_cmd()
+        .ok_or("Tailscale isn't installed")?
+        .args(args)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    let stdout = Arc::new(Mutex::new(String::new()));
+    let stderr = Arc::new(Mutex::new(String::new()));
+    let mut readers = Vec::new();
+    if let Some(out) = child.stdout.take() {
+        readers.push(spawn_reader(out, stdout.clone()));
     }
-    let out = cmd.output().map_err(|e| e.to_string())?;
-    if out.status.success() {
-        Ok(())
-    } else {
-        Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
+    if let Some(err) = child.stderr.take() {
+        readers.push(spawn_reader(err, stderr.clone()));
     }
+    let start = Instant::now();
+    let status = loop {
+        if let Some(st) = child.try_wait().map_err(|e| e.to_string())? {
+            break Some(st);
+        }
+        if start.elapsed() > timeout {
+            let _ = child.kill();
+            let _ = child.wait();
+            break None;
+        }
+        std::thread::sleep(Duration::from_millis(150));
+    };
+    for r in readers {
+        let _ = r.join();
+    }
+    let out = stdout.lock().unwrap().clone();
+    let err = stderr.lock().unwrap().clone();
+    Ok((status.is_some(), status.is_some_and(|s| s.success()), out, err))
 }
 
-/// Reports the public https URL if `tailscale serve` is currently pointing at our port.
+fn spawn_reader<R: std::io::Read + Send + 'static>(mut r: R, into: Arc<Mutex<String>>) -> std::thread::JoinHandle<()> {
+    std::thread::spawn(move || {
+        let mut buf = String::new();
+        let _ = r.read_to_string(&mut buf);
+        into.lock().unwrap().push_str(&buf);
+    })
+}
+
+/// Uses `tailscale serve` to publish the server at https://<machine>.<tailnet>.ts.net with a real certificate.
+fn tailscale_serve(port: u16, on: bool) -> Result<(), String> {
+    let target = format!("http://127.0.0.1:{port}");
+    let args: Vec<&str> = if on { vec!["serve", "--bg", "--https=443", &target] } else { vec!["serve", "--https=443", "off"] };
+    let (finished, ok, out, err) = run_tailscale(&args, Duration::from_secs(20))?;
+    let text = format!("{out}
+{err}");
+    // Serve not yet allowed on the tailnet: the CLI prints an approval link and waits. Open it for the user.
+    if let Some(link) = text.split_whitespace().find(|w| w.starts_with("https://login.tailscale.com/")) {
+        let _ = open::that(link.trim_end_matches(['.', ',']));
+        return Err("Tailscale needs you to allow this once in the browser window that just opened. Approve it, then choose Remote access → Turn on again.".into());
+    }
+    if !finished {
+        return Err("Tailscale didn't respond. Make sure it's running and you're signed in.".into());
+    }
+    if ok { Ok(()) } else { Err(text.trim().to_string()) }
+}
+
+fn remote_state(port: u16) -> Remote {
+    if tailscale_exe().is_none() {
+        return Remote::NotInstalled;
+    }
+    let status = run_tailscale(&["status", "--json"], Duration::from_secs(8))
+        .ok()
+        .and_then(|(_, _, out, _)| serde_json::from_str::<serde_json::Value>(out.trim_start_matches(|c: char| c != '{')).ok());
+    let Some(status) = status else {
+        return Remote::NotConnected("not running".into());
+    };
+    let backend = status.get("BackendState").and_then(|v| v.as_str()).unwrap_or("unknown");
+    if backend != "Running" {
+        let reason = match backend {
+            "NeedsLogin" => "signed out",
+            "Stopped" => "turned off",
+            "NeedsMachineAuth" => "waiting for admin approval",
+            other => other,
+        };
+        return Remote::NotConnected(reason.to_string());
+    }
+    let dns = status
+        .pointer("/Self/DNSName")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim_end_matches('.')
+        .to_string();
+    if let Some(url) = serve_url(port) {
+        return Remote::On { url };
+    }
+    let https = status.get("CertDomains").and_then(|v| v.as_array()).is_some_and(|a| !a.is_empty());
+    if !https {
+        return Remote::NoHttps { dns };
+    }
+    Remote::Off { dns }
+}
+
+/// The public https URL if `tailscale serve` is currently pointing at our port.
+fn serve_url(port: u16) -> Option<String> {
+    let (_, _, out, _) = run_tailscale(&["serve", "status", "--json"], Duration::from_secs(8)).ok()?;
+    let serve: serde_json::Value = serde_json::from_str(out.trim_start_matches(|c: char| c != '{')).ok()?;
+    let target = format!("127.0.0.1:{port}");
+    let web = serve.get("Web")?.as_object()?;
+    let host = web.iter().find_map(|(hostport, cfg)| {
+        let handlers = cfg.get("Handlers")?.as_object()?;
+        let points_here = handlers.values().any(|h| h.get("Proxy").and_then(|p| p.as_str()).is_some_and(|p| p.contains(&target)));
+        points_here.then(|| hostport.trim_end_matches(":443").to_string())
+    })?;
+    Some(format!("https://{host}/app/"))
+}
+
 fn refresh_remote(port: u16, proxy: EventLoopProxy<UserEvent>) {
     std::thread::spawn(move || {
-        let url = (|| {
-            let out = tailscale_cmd()?.args(["serve", "status", "--json"]).output().ok()?;
-            let serve: serde_json::Value = serde_json::from_slice(&out.stdout).ok()?;
-            let target = format!("127.0.0.1:{port}");
-            let web = serve.get("Web")?.as_object()?;
-            let host = web.iter().find_map(|(hostport, cfg)| {
-                let handlers = cfg.get("Handlers")?.as_object()?;
-                let points_here = handlers.values().any(|h| h.get("Proxy").and_then(|p| p.as_str()).is_some_and(|p| p.contains(&target)));
-                points_here.then(|| hostport.trim_end_matches(":443").to_string())
-            })?;
-            Some(format!("https://{host}/app/"))
-        })();
-        let _ = proxy.send_event(UserEvent::Remote(url));
+        let _ = proxy.send_event(UserEvent::Remote(remote_state(port)));
     });
+}
+
+fn open_tailscale_app() {
+    let gui = if cfg!(windows) {
+        Some(PathBuf::from(r"C:\Program Files\Tailscale\tailscale-ipn.exe"))
+    } else if cfg!(target_os = "macos") {
+        Some(PathBuf::from("/Applications/Tailscale.app"))
+    } else {
+        None
+    };
+    match gui.filter(|p| p.exists()) {
+        Some(p) => {
+            let _ = open::that(p);
+        }
+        None => {
+            let _ = open::that("https://login.tailscale.com/");
+        }
+    }
 }
 
 // ---------------- Helpers ----------------
@@ -456,7 +579,8 @@ fn find_server_exe() -> Option<PathBuf> {
 
 fn which(cmd: &str) -> Option<PathBuf> {
     let path = std::env::var_os("PATH")?;
-    std::env::split_paths(&path).map(|d| d.join(cmd)).find(|p| p.is_file())
+    let name = if cfg!(windows) { format!("{cmd}.exe") } else { cmd.to_string() };
+    std::env::split_paths(&path).map(|d| d.join(&name)).find(|p| p.is_file())
 }
 
 fn random_secret() -> String {
@@ -525,6 +649,16 @@ fn load_icon() -> Icon {
 }
 
 fn show_error(message: &str) {
+    show_message(message, 0x10);
+}
+
+/// Non-blocking information box (its own thread, so the tray menu keeps working while it's open).
+fn show_info(message: &str) {
+    let message = message.to_string();
+    std::thread::spawn(move || show_message(&message, 0x40));
+}
+
+fn show_message(message: &str, icon: u32) {
     #[cfg(windows)]
     {
         // MessageBoxW without pulling in a Windows API crate.
@@ -534,11 +668,12 @@ fn show_error(message: &str) {
         }
         let wide = |s: &str| s.encode_utf16().chain(std::iter::once(0)).collect::<Vec<u16>>();
         unsafe {
-            MessageBoxW(std::ptr::null_mut(), wide(message).as_ptr(), wide(APP_NAME).as_ptr(), 0x10);
+            MessageBoxW(std::ptr::null_mut(), wide(message).as_ptr(), wide(APP_NAME).as_ptr(), icon);
         }
     }
     #[cfg(not(windows))]
     {
+        let _ = icon;
         eprintln!("{APP_NAME}: {message}");
     }
 }
