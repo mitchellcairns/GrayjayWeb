@@ -27,10 +27,12 @@ const filterKey = (f: { id?: string; name: string }) => f.id || f.name;
 const sortLabel = (s: string) => SORT_LABELS[s.toLowerCase()] ?? s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
 
 export async function openAnyUrl(url: string, navigate: (to: string) => void) {
-  const plan = await handling.plan(url);
-  if (plan.type === "content") player.open(plan.data ?? url);
-  else if (plan.type === "channel") navigate(channelHref(plan.data ?? url));
-  else if (plan.type === "playlist") window.open(url, "_blank");
+  // The server also follows short links (t.co, search.app, bit.ly…) and redirect wrappers to the real address.
+  const plan = await handling.resolve(url).catch(() => handling.plan(url));
+  const target = plan.data || url;
+  if (plan.type === "content") player.open(target);
+  else if (plan.type === "channel") navigate(channelHref(target));
+  else if (plan.type === "playlist") window.open(target, "_blank");
   else throw new Error("None of your sources can open that link.");
 }
 
@@ -77,7 +79,7 @@ export default function Search() {
   const pager = createPager(
     () => search.loadLazy(query(), type(), type() === ContentType.MEDIA ? filters() : undefined, excluded(), type() === ContentType.MEDIA ? order() ?? undefined : undefined),
     () => search.next(),
-    { eagerSecondPage: true },
+    { eagerSecondPage: true, current: () => search.current() },
   );
 
   const run = async (raw: string) => {

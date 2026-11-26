@@ -4,6 +4,19 @@ import { createSignal, onCleanup } from "solid-js";
 import type { PagerResult } from "../api";
 import { on } from "../api/socket";
 
+// A lazy pager's real results can be pushed (PagerUpdated) before the HTTP reply that tells us its id arrives — the two
+// travel on different connections. Remember recent updates so a pager can pick up one it would otherwise have missed.
+const recentUpdates = new Map<string, { at: number; payload: any }>();
+on<any>("PagerUpdated", (packet) => {
+  if (!packet.id) return;
+  const now = Date.now();
+  for (const [id, u] of recentUpdates) if (now - u.at > 60_000) recentUpdates.delete(id);
+  recentUpdates.set(packet.id, { at: now, payload: packet.payload });
+});
+
+const PLACEHOLDER = 90;
+const isLoadingPlaceholder = (x: any) => x?.contentType === PLACEHOLDER && !x?.error;
+
 export interface Pager<T> {
   items: () => T[];
   loading: () => boolean;
@@ -19,7 +32,13 @@ export interface Pager<T> {
 export function createPager<T>(
   load: () => Promise<PagerResult<T>>,
   next: () => Promise<PagerResult<T>>,
-  opts: { eagerSecondPage?: boolean; filter?: (item: T) => boolean } = {},
+  opts: {
+    eagerSecondPage?: boolean;
+    filter?: (item: T) => boolean;
+    /** Re-reads the current page without advancing. Polled while it still shows "loading" placeholders, in case the
+     * WebSocket update with the real results never reaches us (e.g. the socket was reconnecting after the phone woke). */
+    current?: () => Promise<PagerResult<T>>;
+  } = {},
 ): Pager<T> {
   const [items, setItems] = createSignal<T[]>([]);
   const [loading, setLoading] = createSignal(false);
@@ -33,16 +52,36 @@ export function createPager<T>(
 
   const keep = (list: T[]) => (opts.filter ? list.filter(opts.filter) : list);
 
-  const off = on<PagerResult<T>>("PagerUpdated", (packet) => {
-    if (!pagerId || packet.id !== pagerId) return;
-    // Like the desktop client, an update carries the pager's full refreshed result set (placeholders resolved).
-    const results = keep(packet.payload?.results ?? []);
+  // Like the desktop client, an update carries the pager's full refreshed result set (placeholders resolved).
+  const applyUpdate = (payload: PagerResult<T> | undefined) => {
+    const results = keep(payload?.results ?? []);
     setItems(results);
     firstPageSize = results.length;
     setUpdated(true);
-    if (packet.payload && typeof packet.payload.hasMore === "boolean") setHasMore(packet.payload.hasMore);
+    if (payload && typeof payload.hasMore === "boolean") setHasMore(payload.hasMore);
+  };
+  const off = on<PagerResult<T>>("PagerUpdated", (packet) => {
+    if (!pagerId || packet.id !== pagerId) return;
+    applyUpdate(packet.payload);
   });
-  onCleanup(off);
+  let pollTimer: number | undefined;
+  onCleanup(() => { off(); clearTimeout(pollTimer); });
+
+  /** While the first page is still placeholders, re-read it now and then (gives up after ~40 s). */
+  const pollWhileLoading = (gen: number, id: string | undefined, tries = 0) => {
+    clearTimeout(pollTimer);
+    if (!opts.current || tries >= 20) return;
+    pollTimer = window.setTimeout(async () => {
+      if (gen !== generation || id !== pagerId || !items().some(isLoadingPlaceholder)) return;
+      try {
+        const r = await opts.current!();
+        if (gen !== generation || id !== pagerId) return;
+        if (r.pagerID && r.pagerID !== id) return; // the server has moved on to another search
+        if (!(r.results ?? []).some(isLoadingPlaceholder)) { applyUpdate(r); return; }
+      } catch { }
+      pollWhileLoading(gen, id, tries + 1);
+    }, tries < 5 ? 1500 : 3000);
+  };
 
   async function run(fn: () => Promise<PagerResult<T>>, replace: boolean) {
     const gen = generation;
@@ -57,6 +96,9 @@ export function createPager<T>(
         pagerId = result.pagerID;
         firstPageSize = results.length;
         setItems(results);
+        const early = pagerId ? recentUpdates.get(pagerId) : undefined;
+        if (early) applyUpdate(early.payload); // the update beat the reply
+        else if (results.some(isLoadingPlaceholder)) pollWhileLoading(gen, pagerId);
       } else {
         setItems((cur) => [...cur, ...results]);
       }
@@ -84,7 +126,7 @@ export function createPager<T>(
       setUpdated(false);
       await run(load, true);
       // Skip the eager second page while the first is still lazy placeholders (it would only add more placeholders).
-      const allPlaceholders = items().length > 0 && items().every((x: any) => x?.contentType === 90);
+      const allPlaceholders = items().length > 0 && items().every((x: any) => x?.contentType === PLACEHOLDER);
       if (opts.eagerSecondPage && hasMore() && !error() && !allPlaceholders) await pager.next();
     },
   };

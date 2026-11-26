@@ -33,7 +33,27 @@ namespace Grayjay.ClientServer.Controllers
                 _ => throw new NotImplementedException()
             };
             this.State().SearchState.SearchPager = search;
-            return search.AsPagerResult();
+            // [GrayjayWeb] A source that finishes while the lazy pager is being built is briefly in neither its placeholders
+            // nor its results (Grayjay.Engine MultiRefreshPager drops it from "pending" before adding its pager), so the
+            // first page could come back empty and show "No results" for a search that had some. Give it a moment.
+            var result = search.AsPagerResult();
+            var waited = System.Diagnostics.Stopwatch.StartNew();
+            while (result.Results.Length == 0 && waited.ElapsedMilliseconds < 400)
+            {
+                Thread.Sleep(20);
+                result = search.AsPagerResult();
+            }
+            return result;
+        }
+
+        /// <summary>[GrayjayWeb] The current page of this window's search, without advancing it. The app polls this when
+        /// the WebSocket update that replaces "loading" placeholders with results didn't reach it.</summary>
+        [HttpGet]
+        public PagerResult<PlatformContent> SearchCurrent()
+        {
+            var search = EnsureSearchPager();
+            lock (search)
+                return search.AsPagerResult();
         }
 
         [HttpGet]

@@ -1,6 +1,9 @@
 import { JSX, createEffect, on, onMount } from "solid-js";
 import { A, useLocation, useNavigate, useSearchParams } from "@solidjs/router";
 import { setup } from "../api";
+import { isShortLink } from "../lib/nav";
+import { openAnyUrl } from "../pages/Search";
+import { toastError } from "../components/Toasts";
 import CustomDialogs from "./CustomDialogs";
 import GlobalSheets from "../components/GlobalSheets";
 import Icon from "../components/Icon";
@@ -40,7 +43,16 @@ export default function Shell(props: { children?: JSX.Element }) {
     setWatchParam: (url, replace) => setParams({ watch: url ?? undefined }, { replace, scroll: false }),
     back: () => history.back(),
   });
-  createEffect(on(() => params.watch, (w) => player.syncFromUrl(typeof w === "string" ? w : null)));
+  createEffect(on(() => params.watch, (w) => {
+    const target = typeof w === "string" ? w : null;
+    // A short link (from the iPhone Shortcut, the bookmark or a link app): find the real video first.
+    if (target && isShortLink(target)) {
+      setParams({ watch: undefined }, { replace: true, scroll: false });
+      openAnyUrl(target, (to) => navigate(to)).catch(toastError);
+      return;
+    }
+    player.syncFromUrl(target);
+  }));
 
   // Scroll to top on page change (not on ?watch toggles).
   createEffect(on(() => location.pathname, () => window.scrollTo({ top: 0 }), { defer: true }));

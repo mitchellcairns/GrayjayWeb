@@ -121,6 +121,7 @@ export const search = {
   loadLazy: (query: string, type: number = ContentType.MEDIA, filters?: Record<string, string[]>, excludePlugins?: string[], order?: string) =>
     post<PagerResult<Content>>("/search/SearchLoadLazy", { type, query, order, filters, excludePlugins }),
   next: () => get<PagerResult<Content>>("/search/SearchNextPage"),
+  current: () => get<PagerResult<Content>>("/search/SearchCurrent"),
   suggestions: (query: string) => get<string[]>(`/search/SearchSuggestions?query=${q(query)}`),
   previous: () => get<string[]>("/search/PreviousSearches"),
   addPrevious: (query: string) => get(`/search/AddPreviousSearch?query=${q(query)}`),
@@ -153,6 +154,8 @@ export const history = {
 
 export const handling = {
   plan: (url: string) => get<{ type: "content" | "channel" | "playlist" | string; data: any }>(`/handle/GetHandlePlan?url=${q(url)}`),
+  /** Like plan(), but also unwraps redirect links and follows short links (t.co, search.app, bit.ly…). Data is the address to open. */
+  resolve: (url: string) => get<{ type: "content" | "channel" | "playlist" | string; data: string }>(`/web/link/Plan?url=${q(url)}`),
 };
 
 // ---------- Playback ----------
