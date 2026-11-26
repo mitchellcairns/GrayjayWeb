@@ -253,7 +253,7 @@ export default function WatchOverlay() {
               </button>
 
               <div class="watch-author">
-                <a href={channelHref(meta()?.author?.url)} onClick={(e) => { e.preventDefault(); player.minimize(); navigate(channelHref(meta()?.author?.url)); }} class="row" style={{ gap: "10px", "min-width": 0, flex: 1 }}>
+                <a href={channelHref(meta()?.author?.url)} onClick={(e) => { e.preventDefault(); const href = channelHref(meta()?.author?.url); player.minimize(() => navigate(href)); }} class="row" style={{ gap: "10px", "min-width": 0, flex: 1 }}>
                   <Avatar src={meta()?.author?.thumbnail} name={meta()?.author?.name} size={40} />
                   <div style={{ "min-width": 0 }}>
                     <div class="author-name">{meta()?.author?.name}</div>

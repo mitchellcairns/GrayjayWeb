@@ -44,7 +44,7 @@ function CardMenu() {
           <Icon name="later" /> <div class="grow title">{watchLater.has(item()?.url) ? "Remove from Watch later" : "Save to Watch later"}</div>
         </button>
         <Show when={item()?.author?.url}>
-          <button class="list-item" onClick={act((it) => navigate(channelHref(it.author!.url)))}>
+          <button class="list-item" onClick={act((it) => { const href = channelHref(it.author!.url); player.minimize(() => navigate(href)); })}>
             <Icon name="user" /> <div class="grow title">Go to {item()?.author?.name || "channel"}</div>
           </button>
           <button class="list-item danger-item" onClick={act((it) => hideCreator(it))}>

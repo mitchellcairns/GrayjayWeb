@@ -1,4 +1,4 @@
-import { Show, createEffect, createResource, createSignal, on } from "solid-js";
+import { For, Show, createEffect, createResource, createSignal, on } from "solid-js";
 import { useSearchParams } from "@solidjs/router";
 import { channel as channelApi, subscriptions } from "../api";
 import { createPager } from "../lib/pager";
@@ -6,27 +6,53 @@ import { formatCount, joinDot } from "../lib/format";
 import Feed from "../components/Feed";
 import { Avatar } from "../components/ContentCard";
 import RichText from "../components/RichText";
+import Sheet from "../components/Sheet";
 import { toast, toastError } from "../components/Toasts";
 import PageHeader from "../shell/PageHeader";
 import Icon from "../components/Icon";
 import { hidden } from "../lib/hidden";
 import "./Channel.css";
 
+const TYPE_LABELS: Record<string, string> = { VIDEOS: "Videos", STREAMS: "Live", LIVE: "Live now", SHORTS: "Shorts", POSTS: "Posts" };
+
+/**
+ * A channel is its videos: newest first, filling the page. Everything else (search, playlists, about, hide) is a small
+ * button. Type chips (Videos / Live / Shorts) appear only when the source offers more than one. (No "Popular" sort:
+ * YouTube's plugin advertises it but ignores it.)
+ */
 export default function Channel() {
   const [params] = useSearchParams();
   const url = () => (typeof params.url === "string" ? params.url : "");
-  const [tab, setTab] = createSignal<"videos" | "playlists" | "about">("videos");
 
   const [ch] = createResource(url, (u) => channelApi.load(u));
   // Subscriptions are stored under the channel's canonical URL (e.g. /channel/UC…), not the handle URL you may have opened.
   const canonicalUrl = () => ch()?.url || url();
   const [subscribed, { mutate }] = createResource(() => (ch.loading ? undefined : canonicalUrl()), (u) => subscriptions.isSubscribed(u).catch(() => false));
-  const [canPlaylists] = createResource(url, (u) => channelApi.canGetPlaylists(u).catch(() => false));
+  const [caps] = createResource(url, (u) => channelApi.capabilities(u).catch(() => ({ types: [], sorts: [], search: false, playlists: false })));
 
-  const videos = createPager(() => channelApi.contentLoad(url()), () => channelApi.contentNext());
+  // What the video list shows.
+  const [type, setType] = createSignal<string | null>(null); // null = everything (videos + streams, newest first)
+  const [order] = createSignal("CHRONOLOGICAL");
+  const [searchOpen, setSearchOpen] = createSignal(false);
+  const [searchText, setSearchText] = createSignal("");
+  const [query, setQuery] = createSignal("");
+  const types = () => (caps()?.types ?? []).filter((t) => TYPE_LABELS[t]);
+
+  const videos = createPager(
+    () => {
+      if (query()) return channelApi.search(url(), query());
+      if (type() || order() !== "CHRONOLOGICAL") return channelApi.contentLoadTyped(url(), type() ?? undefined, order());
+      return channelApi.contentLoad(url());
+    },
+    () => channelApi.contentNext(),
+  );
+  createEffect(on([url, type, order, query], ([u]) => { if (u) videos.reload(); }));
+  createEffect(on(url, () => { setType(null); setQuery(""); setSearchText(""); setSearchOpen(false); }, { defer: true }));
+
+  const [playlistsOpen, setPlaylistsOpen] = createSignal(false);
+  const [aboutOpen, setAboutOpen] = createSignal(false);
   const playlists = createPager(() => channelApi.playlistsLoad(url()), () => channelApi.playlistsNext());
-  createEffect(on(url, (u) => { if (u) { setTab("videos"); videos.reload(); } }));
-  createEffect(on(tab, (t) => { if (t === "playlists" && !playlists.loaded()) playlists.reload(); }, { defer: true }));
+  createEffect(on(playlistsOpen, (o) => { if (o) playlists.reload(); }, { defer: true }));
 
   const toggle = async () => {
     try {
@@ -51,6 +77,10 @@ export default function Channel() {
     } catch (e) { toastError(e); }
   };
 
+  let searchInput!: HTMLInputElement;
+  const openSearch = () => { setSearchOpen(true); queueMicrotask(() => searchInput?.focus()); };
+  const closeSearch = () => { setSearchOpen(false); setSearchText(""); setQuery(""); };
+
   return (
     <>
       <PageHeader back title={ch()?.name} />
@@ -59,37 +89,65 @@ export default function Channel() {
           <div class="channel-banner"><img src={ch()!.banner} alt="" referrerpolicy="no-referrer" /></div>
         </Show>
         <div class="channel-head">
-          <Avatar src={ch()?.thumbnail} name={ch()?.name} size={72} />
+          <Avatar src={ch()?.thumbnail} name={ch()?.name} size={56} />
           <div class="channel-id">
             <h1>{ch()?.name ?? (ch.loading ? "" : "Channel")}</h1>
             <p class="muted">{joinDot(ch()?.subscribers && ch()!.subscribers! > 0 ? `${formatCount(ch()!.subscribers)} subscribers` : "", ch()?.id?.platform)}</p>
           </div>
-        </div>
-        <div class="row" style={{ margin: "14px 0 6px" }}>
-          <button class={`btn ${subscribed() ? "" : "primary"}`} style={{ flex: 1, "max-width": "320px" }} onClick={toggle} disabled={subscribed.loading}>
+          <button class={`btn ${subscribed() ? "" : "primary"} channel-sub`} onClick={toggle} disabled={subscribed.loading || !ch()}>
             {subscribed() ? "Subscribed" : "Subscribe"}
           </button>
-          <button class="btn" onClick={toggleHidden} disabled={!ch()} title={isHidden() ? "Show this creator in your feeds again" : "Never show this creator in Discover, Subscriptions, search or Up next"}>
-            <Icon name={isHidden() ? "show" : "hide"} size={18} /> {isHidden() ? "Unhide" : "Hide"}
+        </div>
+
+        <div class="channel-tools">
+          <Show when={caps()?.search}>
+            <button class="btn small ghost" classList={{ "is-on": searchOpen() }} onClick={() => (searchOpen() ? closeSearch() : openSearch())}><Icon name="search" size={16} /><span>Search</span></button>
+          </Show>
+          <Show when={caps()?.playlists}>
+            <button class="btn small ghost" onClick={() => setPlaylistsOpen(true)}><Icon name="list" size={16} /><span>Playlists</span></button>
+          </Show>
+          <button class="btn small ghost" onClick={() => setAboutOpen(true)} disabled={!ch()}><Icon name="info" size={16} /><span>About</span></button>
+          <button class="btn small ghost" onClick={toggleHidden} disabled={!ch()} title={isHidden() ? "Show this creator in your feeds again" : "Never show this creator in Discover, Subscriptions, search or Up next"}>
+            <Icon name={isHidden() ? "show" : "hide"} size={16} /><span>{isHidden() ? "Unhide" : "Hide"}</span>
           </button>
-          <a class="btn" href={url()} target="_blank" rel="noreferrer">Open</a>
-        </div>
-        <Show when={ch.error}><div class="feed-status">{(ch.error as Error).message}</div></Show>
-
-        <div class="tabs" role="tablist">
-          <button role="tab" aria-selected={tab() === "videos"} onClick={() => setTab("videos")}>Videos</button>
-          <Show when={canPlaylists()}><button role="tab" aria-selected={tab() === "playlists"} onClick={() => setTab("playlists")}>Playlists</button></Show>
-          <button role="tab" aria-selected={tab() === "about"} onClick={() => setTab("about")}>About</button>
+          <a class="btn small ghost" href={url()} target="_blank" rel="noreferrer"><Icon name="external" size={16} /><span>Open</span></a>
         </div>
 
-        <Show when={tab() === "videos"}><Feed pager={videos} hideAuthor allowHidden /></Show>
-        <Show when={tab() === "playlists"}><Feed pager={playlists} hideAuthor allowHidden /></Show>
-        <Show when={tab() === "about"}>
-          <div class="card" style={{ "white-space": "pre-wrap", "overflow-wrap": "anywhere" }}>
-            <RichText text={ch()?.description || "No description."} />
+        <Show when={searchOpen()}>
+          <form class="channel-search" onSubmit={(e) => { e.preventDefault(); setQuery(searchText().trim()); searchInput.blur(); }}>
+            <input ref={searchInput} class="field" type="search" enterkeyhint="search" placeholder={`Search ${ch()?.name ?? "this channel"}`}
+              value={searchText()} onInput={(e) => { setSearchText(e.currentTarget.value); if (!e.currentTarget.value) setQuery(""); }} />
+            <button type="button" class="btn small ghost" onClick={closeSearch}>Cancel</button>
+          </form>
+        </Show>
+
+        <Show when={!query() && types().length > 1}>
+          <div class="channel-filters">
+            <Show when={types().length > 1}>
+              <div class="chips">
+                <button class="chip" aria-pressed={type() === null} onClick={() => setType(null)}>All</button>
+                <For each={types()}>{(t) => <button class="chip" aria-pressed={type() === t} onClick={() => setType(t)}>{TYPE_LABELS[t]}</button>}</For>
+              </div>
+            </Show>
           </div>
         </Show>
+        <Show when={query()}>
+          <p class="muted channel-results">Results for “{query()}”</p>
+        </Show>
+
+        <Show when={ch.error}><div class="feed-status">{(ch.error as Error).message}</div></Show>
+        <Feed pager={videos} hideAuthor allowHidden
+          empty={<div class="empty"><h3>{query() ? "No matching videos" : "No videos"}</h3></div>} />
       </main>
+
+      <Sheet open={playlistsOpen()} onClose={() => setPlaylistsOpen(false)} title="Playlists" size="tall">
+        <Feed pager={playlists} layout="list" hideAuthor allowHidden empty={<div class="empty"><h3>No playlists</h3></div>} />
+      </Sheet>
+      <Sheet open={aboutOpen()} onClose={() => setAboutOpen(false)} title={ch()?.name ?? "About"}>
+        <div style={{ "white-space": "pre-wrap", "overflow-wrap": "anywhere" }}>
+          <RichText text={ch()?.description || "No description."} />
+        </div>
+      </Sheet>
     </>
   );
 }

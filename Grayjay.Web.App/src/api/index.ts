@@ -134,6 +134,11 @@ export const channel = {
   canGetPlaylists: (url: string) => get<boolean>(`/channel/CanGetChannelPlaylists?url=${q(url)}`),
   playlistsLoad: (url: string) => get<PagerResult<Content>>(`/channel/ChannelPlaylistsLoad?url=${q(url)}`),
   playlistsNext: () => get<PagerResult<Content>>("/channel/ChannelPlaylistsNextPage"),
+  /** Content types (VIDEOS, STREAMS, SHORTS…), sort orders (CHRONOLOGICAL, Popular…), search and playlists support. */
+  capabilities: (url: string) => get<{ types: string[]; sorts: string[]; search: boolean; playlists: boolean }>(`/channel/ChannelCapabilities?url=${q(url)}`),
+  contentLoadTyped: (url: string, type?: string, order?: string) =>
+    get<PagerResult<Content>>(`/channel/ChannelContentLoadTyped?url=${q(url)}${type ? `&type=${q(type)}` : ""}${order ? `&order=${q(order)}` : ""}`),
+  search: (url: string, query: string) => get<PagerResult<Content>>(`/channel/ChannelContentLoadSearch?url=${q(url)}&query=${q(query)}`),
 };
 
 export const history = {

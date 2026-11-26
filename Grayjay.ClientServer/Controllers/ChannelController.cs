@@ -79,6 +79,33 @@ namespace Grayjay.ClientServer.Controllers
             Logger.w(nameof(ChannelController), $"ChannelContentLoad took {watch.Elapsed.TotalMilliseconds}ms");
             return pager.AsPagerResult();
         }
+        // [GrayjayWeb] Channel page: what the source offers for this channel (content types, sort orders, search,
+        // playlists), and content of one type/order (e.g. only Shorts, or Popular) instead of the default mixed feed.
+        [HttpGet]
+        public object ChannelCapabilities(string url)
+        {
+            var client = StatePlatform.GetChannelClientOrNull(url);
+            if (client == null)
+                return new { types = new List<string>(), sorts = new List<string>(), search = false, playlists = false };
+            var caps = client.GetChannelCapabilities();
+            return new
+            {
+                types = caps?.Types ?? new List<string>(),
+                sorts = caps?.Sorts ?? new List<string>(),
+                search = client.Capabilities.HasSearchChannelContents,
+                playlists = client.Capabilities.HasGetChannelPlaylists
+            };
+        }
+        [HttpGet]
+        public PagerResult<PlatformContent> ChannelContentLoadTyped(string url, string? type = null, string? order = null)
+        {
+            var state = this.State().ChannelState;
+            var client = StatePlatform.GetChannelClientOrNull(url) ?? throw new BadHttpRequestException("No enabled source can open this channel");
+            var pager = new AnonymousContentRefPager(StatePlatform.GetChannelContent(client, url, type, order ?? Grayjay.Engine.Models.Capabilities.ResultCapabilities.ORDER_CHONOLOGICAL));
+            lock (state.ChannelPagerLock)
+                state.ChannelPager = pager;
+            return pager.AsPagerResult();
+        }
         [HttpGet]
         public bool CanSearchChannel(string url)
         {

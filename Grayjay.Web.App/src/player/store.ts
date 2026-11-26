@@ -182,13 +182,19 @@ function createPlayerStore() {
       }
     },
 
-    minimize() {
-      if (mode() !== "full") return;
+    /**
+     * Shrink to the mini-player. `then` runs once the URL no longer has ?watch= (e.g. navigate to a channel): going
+     * Back is asynchronous, so navigating straight away would be undone by it.
+     */
+    minimize(then?: () => void) {
+      if (mode() !== "full") { then?.(); return; }
       if (openedViaPush) {
         openedViaPush = false;
+        if (then) addEventListener("popstate", () => setTimeout(then, 0), { once: true });
         nav?.back();
       } else {
         nav?.setWatchParam(null, true);
+        then?.();
       }
       setMode("mini");
     },

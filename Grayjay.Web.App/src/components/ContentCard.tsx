@@ -1,5 +1,5 @@
 import { Match, Show, Switch, createMemo, createSignal, onCleanup } from "solid-js";
-import { A } from "@solidjs/router";
+import { A, useNavigate } from "@solidjs/router";
 import { Content, ContentType } from "../api";
 import { bestThumbnail, formatAgo, formatCount, formatDuration, formatViews, joinDot } from "../lib/format";
 import { channelHref } from "../lib/nav";
@@ -92,9 +92,23 @@ export function SkeletonCard(props: { layout?: "grid" | "row" }) {
 }
 
 /** One piece of content from any source. Layout "grid" for feeds, "row" for compact lists (recommendations, search on mobile). */
+/** Opens the creator's channel from inside a card (the card itself is a link, so this can't be another <a>). */
+function useChannelLink() {
+  const navigate = useNavigate();
+  return (url: string | undefined, e: Event) => {
+    e.preventDefault(); e.stopPropagation();
+    if (!url) return;
+    const href = channelHref(url);
+    player.minimize(() => navigate(href));
+  };
+}
+
 export default function ContentCard(props: { item: Content; layout?: "grid" | "row"; progress?: number; hideAuthor?: boolean; noQueue?: boolean; noMenu?: boolean }) {
   const layout = () => props.layout ?? "grid";
   const item = () => props.item;
+  const goChannel = useChannelLink();
+  const stats = () => joinDot(item().isLive ? (item().viewCount ? `${formatCount(item().viewCount)} watching` : "Live") : formatViews(item().viewCount), !item().isLive && formatAgo(item().dateTime));
+  const onKeyChannel = (e: KeyboardEvent) => { if (e.key === "Enter" || e.key === " ") goChannel(item().author?.url, e); };
   const open = (e: MouseEvent) => {
     e.preventDefault();
     player.open(item().url, item());
@@ -108,14 +122,19 @@ export default function ContentCard(props: { item: Content; layout?: "grid" | "r
             duration={item().duration} live={item().isLive} progress={props.progress} queueItem={props.noQueue ? undefined : item()} />
           <div class="meta">
             <Show when={layout() === "grid" && !props.hideAuthor}>
-              <A href={channelHref(item().author?.url)} onClick={(e) => e.stopPropagation()} class="avatar-link" aria-label={item().author?.name}>
+              <span role="link" tabindex="0" class="avatar-link" aria-label={item().author?.name}
+                onClick={(e) => goChannel(item().author?.url, e)} onKeyDown={onKeyChannel}>
                 <Avatar src={item().author?.thumbnail} name={item().author?.name} />
-              </A>
+              </span>
             </Show>
             <div class="text">
               <h3 class="title">{item().name || item().contentName}</h3>
               <p class="sub">
-                {joinDot(!props.hideAuthor && item().author?.name, item().isLive ? (item().viewCount ? `${formatCount(item().viewCount)} watching` : "Live") : formatViews(item().viewCount), !item().isLive && formatAgo(item().dateTime))}
+                <Show when={!props.hideAuthor && item().author?.name}>
+                  <span role="link" tabindex="0" class="author-link" onClick={(e) => goChannel(item().author?.url, e)} onKeyDown={onKeyChannel}>{item().author!.name}</span>
+                  <Show when={stats()}><span aria-hidden="true"> · </span></Show>
+                </Show>
+                {stats()}
               </p>
             </div>
             <Show when={!props.noMenu}>

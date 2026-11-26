@@ -45,6 +45,9 @@
 }
 .card-item.row .title { font-size: 14px; }
 .card-item .sub { font-size: 13px; color: var(--text-2); line-height: 1.35; overflow-wrap: anywhere; }
+.author-link { cursor: pointer; border-radius: 4px; }
+.author-link:hover { color: var(--text); text-decoration: underline; text-underline-offset: 2px; }
+.avatar-link { cursor: pointer; }
 .card-item.row .sub { font-size: 12px; }
 
 .avatar {
