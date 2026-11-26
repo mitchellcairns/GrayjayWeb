@@ -1,0 +1,26 @@
+{
+  "name": "grayjay-web-app",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Grayjay PWA (mobile-first web client for the self-hosted Grayjay server). Derived from FUTO Grayjay Desktop, Source First License 1.1.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "icons": "pwa-assets-generator"
+  },
+  "dependencies": {
+    "@solidjs/router": "^0.15.4",
+    "qrcode-generator": "^2.0.4",
+    "shaka-player": "^5.3.6",
+    "solid-js": "^1.9.20"
+  },
+  "devDependencies": {
+    "@vite-pwa/assets-generator": "^2.0.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.8",
+    "vite-plugin-pwa": "^2.0.0",
+    "vite-plugin-solid": "^2.11.17"
+  }
+}

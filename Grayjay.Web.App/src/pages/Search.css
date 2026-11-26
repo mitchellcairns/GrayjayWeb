@@ -1,0 +1,18 @@
+.searchbar {
+  flex: 1; display: flex; align-items: center; gap: 6px; height: 40px; padding: 0 4px 0 12px; margin: 0 4px;
+  background: var(--bg-elev-2); border-radius: 999px; color: var(--text-2); max-width: 720px;
+}
+.searchbar input { flex: 1; min-width: 0; border: 0; outline: none; background: transparent; color: var(--text); height: 100%; }
+.searchbar input::-webkit-search-cancel-button { display: none; }
+.searchbar .icon-btn { width: 32px; height: 32px; }
+.search-suggest .list-item { min-height: 48px; }
+.search-suggest svg { color: var(--text-3); flex: none; }
+
+.ptr {
+  position: fixed; z-index: 29; left: 50%; top: calc(var(--topbar-h) + var(--safe-top) - 36px); transform: translate(-50%, 0);
+  width: 36px; height: 36px; border-radius: 50%; background: var(--bg-elev-2); display: grid; place-items: center; opacity: 0;
+  box-shadow: var(--shadow); transition: transform 0.2s var(--ease), opacity 0.2s; pointer-events: none;
+}
+.ptr .spinner { width: 18px; height: 18px; border-width: 2px; animation-play-state: paused; }
+.ptr.busy { transform: translate(-50%, 70px) !important; opacity: 1 !important; }
+.ptr.busy .spinner { animation-play-state: running; }
