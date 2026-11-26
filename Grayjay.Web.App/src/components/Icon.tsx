@@ -5,7 +5,7 @@ import {
   FastForward, Gauge, Globe, GripVertical, Heart, History, House, KeyRound, Library, Link, List, ListVideo, Lock, LogOut,
   Maximize, MessageSquare, Minimize, Minus, PictureInPicture2, Play, Pause, Plus, Puzzle, QrCode, RefreshCw, Rewind,
   RotateCcw, RotateCw, Search, Settings, Share2, SkipForward, Smartphone, ThumbsUp, Trash2, TriangleAlert, Tv, User, Users,
-  Volume2, VolumeX, Wifi, X,
+  Volume2, VolumeX, Wifi, X, ListPlus, ListCheck, ListMusic, Headphones, EyeOff, Eye, SkipBack, Video,
 } from "lucide-solid";
 
 // Lucide icons (ISC licence) under the names the app uses.
@@ -63,6 +63,14 @@ const icons: Record<string, Component<any>> = {
   comment: MessageSquare,
   minimize: Minus,
   skip: SkipForward,
+  queueAdd: ListPlus,
+  queued: ListCheck,
+  queue: ListMusic,
+  headphones: Headphones,
+  hide: EyeOff,
+  show: Eye,
+  previous: SkipBack,
+  video: Video,
 };
 
 export type IconName = keyof typeof icons;

@@ -139,6 +139,7 @@ namespace Grayjay.ClientServer
                 WebAuth!.MapEndpoints(_app);
                 WebProxyForwarder.Map(_app);
                 WebSetupEndpoints.Map(_app);
+                WebHiddenCreators.Map(_app);
                 MapWebApp(_app, Web);
                 WebEndpointsHook?.Invoke(_app);
             }

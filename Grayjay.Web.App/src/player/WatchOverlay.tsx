@@ -10,6 +10,10 @@ import RichText from "../components/RichText";
 import Sheet from "../components/Sheet";
 import { toast, toastError } from "../components/Toasts";
 import VideoPlayer from "./VideoPlayer";
+import { queue } from "./queue";
+import { hidden } from "../lib/hidden";
+import { ui } from "../lib/ui";
+import { QueueList } from "../components/GlobalSheets";
 import { suppressNextTap } from "./gesture";
 import { MiniRect, player, prefs, registerPlayerBox } from "./store";
 import "./WatchOverlay.css";
@@ -107,13 +111,33 @@ export default function WatchOverlay() {
   onMount(() => registerPlayerBox(playerBoxEl));
   onCleanup(() => registerPlayerBox(null));
 
-  // Recommendations for the current video.
+  // Recommendations for the current video. They're the lowest priority on the page: the server runs the source plugin
+  // for them, which competes with resolving and starting the video itself. So they load once playback has actually
+  // started (or after 8 s, or if the video fails), never at the same moment as the video.
   const recs = createPager(
     () => details.recommendationsLoad(player.url()!),
     () => details.recommendationsNext(player.url()!),
     { filter: (x) => x.contentType === ContentType.MEDIA },
   );
-  createEffect(on(() => v()?.url, (u) => { if (u) recs.reload(); setDescOpen(false); }));
+  const [recsFor, setRecsFor] = createSignal<string | null>(null);
+  const startRecs = () => {
+    const u = v()?.url;
+    if (!u || recsFor() === u) return;
+    setRecsFor(u);
+    recs.reload();
+  };
+  createEffect(on(() => v()?.url, (u) => {
+    setDescOpen(false);
+    if (!u) return;
+    const t = setTimeout(startRecs, 8000);
+    onCleanup(() => clearTimeout(t));
+  }));
+  createEffect(on(() => player.started() || !!player.error(), (go) => {
+    if (!go) return;
+    const t = setTimeout(startRecs, 1200); // let the first seconds buffer before anything else
+    onCleanup(() => clearTimeout(t));
+  }));
+  const shownRecs = () => (recsFor() === v()?.url ? recs.items().filter((i) => !hidden.isHidden(i.author) && i.url !== player.url()) : []);
 
   // Subscribe state for the author.
   const authorUrl = () => v()?.author?.url;
@@ -138,9 +162,12 @@ export default function WatchOverlay() {
 
   const seekTo = (s: number) => { const el = player.videoEl(); if (el) { el.currentTime = s; el.play().catch(() => { }); } };
 
+  // Queue first, then the top Up next suggestion.
+  const nextItem = () => queue.items()[0] ?? shownRecs()[0];
   const playNext = () => {
-    const next = recs.items()[0];
-    if (next) player.open(next.url, next);
+    const q = queue.shift();
+    const next = q ?? shownRecs()[0];
+    if (next) player.playNow(next.url, next);
   };
 
   // Swipe the player down to minimize (touch).
@@ -190,6 +217,8 @@ export default function WatchOverlay() {
             loading={player.loading()}
             error={player.error()}
             onEnded={playNext}
+            onNext={nextItem() ? playNext : undefined}
+            nextTitle={nextItem()?.name}
           />
         </div>
 
@@ -250,14 +279,20 @@ export default function WatchOverlay() {
             </div>
 
             <aside class="watch-recs">
-              <h2 class="section-title">Up next</h2>
+              <Show when={queue.count() > 0}>
+                <h2 class="section-title">Queue <span class="faint" style={{ "font-weight": 500, "font-size": "14px" }}>{queue.count()}</span>
+                  <button class="btn small ghost" onClick={() => ui.setQueueOpen(true)}>Edit</button>
+                </h2>
+                <QueueList />
+              </Show>
+              <h2 class="section-title">{queue.count() > 0 ? "Then, recommended" : "Up next"}</h2>
               <div class="feed-list">
-                <For each={recs.items()}>{(item) => <ContentCard item={item} layout="row" />}</For>
-                <Show when={!recs.loaded() && recs.loading()}>
+                <For each={shownRecs()}>{(item) => <ContentCard item={item} layout="row" />}</For>
+                <Show when={recsFor() !== v()?.url || (!recs.loaded() && recs.loading())}>
                   <For each={[1, 2, 3, 4, 5]}>{() => <SkeletonCard layout="row" />}</For>
                 </Show>
               </div>
-              <Show when={recs.hasMore() && recs.loaded()}>
+              <Show when={recsFor() === v()?.url && recs.hasMore() && recs.loaded()}>
                 <button class="btn block" style={{ "margin-top": "12px" }} onClick={() => recs.next()} disabled={recs.loading()}>Show more</button>
               </Show>
             </aside>

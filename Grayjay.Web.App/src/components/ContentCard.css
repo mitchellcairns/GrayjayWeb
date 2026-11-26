@@ -15,6 +15,26 @@
 .thumb .badge.live { background: #e5212c; letter-spacing: 0.04em; }
 .thumb .progress { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: rgb(255 255 255 / 0.3); }
 .thumb .progress > div { height: 100%; background: #e5212c; }
+.thumb-queue {
+  position: absolute; top: 6px; right: 6px; width: 34px; height: 34px; border-radius: 999px; border: 0; cursor: pointer;
+  display: grid; place-items: center; color: #fff; background: rgb(0 0 0 / 0.62); backdrop-filter: blur(6px);
+  transition: opacity 0.15s, background 0.15s, transform 0.1s var(--ease);
+}
+.thumb-queue:active { transform: scale(0.9); }
+.thumb-queue.on { background: var(--accent); color: var(--accent-text); }
+/* Mouse: show on hover (always when queued). Touch: always visible, there is no hover. */
+@media (pointer: fine) {
+  .thumb-queue:not(.on) { opacity: 0; }
+  .card-item:hover .thumb-queue, .thumb-queue:focus-visible { opacity: 1; }
+  .thumb-queue:hover { background: rgb(0 0 0 / 0.85); }
+  .thumb-queue.on:hover { background: var(--accent); }
+}
+.card-item.row .thumb-queue { width: 30px; height: 30px; top: 4px; right: 4px; }
+.card-more {
+  flex: none; align-self: flex-start; width: 30px; height: 30px; margin: -4px -6px 0 0; border: 0; border-radius: 999px;
+  background: none; color: var(--text-2); display: grid; place-items: center; cursor: pointer;
+}
+.card-more:hover { background: var(--bg-elev-2); color: var(--text); }
 .locked-overlay { position: absolute; inset: 0; display: grid; place-items: center; color: var(--text-3); }
 
 .card-item .meta { display: flex; gap: 10px; min-width: 0; }
@@ -53,8 +73,21 @@
 .feed-grid > .post-card, .feed-grid > .channel-row { grid-column: 1 / -1; }
 @media (max-width: 599px) {
   .feed-grid { gap: 20px; }
-  /* Edge-to-edge thumbnails on phones, like native apps. */
-  .feed-grid .card-item.grid .thumb { border-radius: 0; margin: 0 calc(-1 * (var(--page-pad) + var(--safe-left))); width: calc(100% + 2 * var(--page-pad)); max-width: none; }
+  /* "Large": edge-to-edge thumbnails on phones, like native apps. */
+  .feed-grid.large .card-item.grid .thumb { border-radius: 0; margin: 0 calc(-1 * (var(--page-pad) + var(--safe-left))); width: calc(100% + 2 * var(--page-pad)); max-width: none; }
+}
+/* "Compact" (default): many more videos per screen. Two columns on phones, ~220px cards on wide screens. */
+.feed-grid.compact { gap: 18px 12px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 215px), 1fr)); }
+.feed-grid.compact .card-item { gap: 7px; }
+.feed-grid.compact .avatar-link, .feed-grid.compact .sk-avatar { display: none; }
+.feed-grid.compact .card-item .title { font-size: 14px; line-height: 1.28; }
+.feed-grid.compact .card-item .sub { font-size: 12px; }
+.feed-grid.compact .thumb { border-radius: var(--radius-s); }
+@media (max-width: 599px) {
+  .feed-grid.compact { grid-template-columns: 1fr 1fr; gap: 16px 10px; }
+  .feed-grid.compact .card-item .title { font-size: 13px; }
+  .feed-grid.compact .thumb .badge { font-size: 11px; padding: 1px 5px; right: 4px; bottom: 4px; }
+  .feed-grid.compact .thumb-queue { width: 30px; height: 30px; top: 4px; right: 4px; }
 }
 .feed-list { display: flex; flex-direction: column; gap: 12px; }
 .feed-sentinel { height: 1px; }

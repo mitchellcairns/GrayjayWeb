@@ -4,6 +4,7 @@ import { details as detailsApi } from "../api";
 import { bestThumbnail, formatDuration } from "../lib/format";
 import Icon from "../components/Icon";
 import { player, prefs } from "./store";
+import { QueueButton } from "../components/GlobalSheets";
 import { consumeSuppressedTap } from "./gesture";
 import { toast } from "../components/Toasts";
 import "./VideoPlayer.css";
@@ -73,6 +74,9 @@ export default function VideoPlayer(props: {
   loading: boolean;
   error: string | null;
   onEnded?: () => void;
+  /** Skip to the next queued / Up next video (also the lock-screen "next" button). */
+  onNext?: () => void;
+  nextTitle?: string;
 }) {
   let container!: HTMLDivElement;
   let el!: HTMLVideoElement;
@@ -125,17 +129,22 @@ export default function VideoPlayer(props: {
     return shakaPlayer;
   }
 
-  createEffect(on(() => props.source, async (src) => {
+  const [usingShaka, setUsingShaka] = createSignal(false);
+  createEffect(on(() => props.source, (src) => {
+    const wasPaused = el.currentTime > 0 && el.paused && !el.ended;
+    loadSource(src, props.startAt || 0, !wasPaused);
+  }));
+
+  async function loadSource(src: SourceDescriptor | null, start: number, autoplay: boolean) {
     setPlayError(null);
     setNeedsTap(false);
     setSeekTarget(null);
     if (!src) return;
-    const start = props.startAt || 0;
-    const wasPaused = el.currentTime > 0 && el.paused && !el.ended;
     try {
       if (isStreamType(src.type)) {
         const nativeHls = src.type.includes("mpegurl") && el.canPlayType("application/vnd.apple.mpegurl") && isIOS;
         if (nativeHls) {
+          setUsingShaka(false);
           await shakaPlayer?.unload();
           el.src = src.url;
           el.currentTime = start;
@@ -148,6 +157,11 @@ export default function VideoPlayer(props: {
           // Managed Media Source (iOS 17.1+) requires remote playback to be disabled or an AirPlay alternative.
           if ((window as any).ManagedMediaSource && !(window as any).MediaSource) el.disableRemotePlayback = true;
           const p = await ensureShaka();
+          // Audio only: Shaka skips the video streams entirely (no video data fetched). Audio is small, so buffer
+          // minutes ahead: browsers may throttle network for a page whose screen is off.
+          const audioOnly = prefs.audioOnly();
+          p.configure({ manifest: { disableVideo: audioOnly }, streaming: { bufferingGoal: audioOnly ? 300 : 40 } });
+          setUsingShaka(true);
           await p.load(src.url, start, src.type);
           // Captions arrive as a text track inside the server's DASH manifest.
           const hasCaptions = (src.subtitleIndex ?? -1) >= 0;
@@ -156,17 +170,30 @@ export default function VideoPlayer(props: {
           p.setTextTrackVisibility?.(hasCaptions);
         }
       } else {
+        setUsingShaka(false);
         await shakaPlayer?.unload();
         el.src = src.url;
         el.addEventListener("loadedmetadata", () => { if (start) el.currentTime = start; }, { once: true });
       }
       el.playbackRate = rate();
-      if (!wasPaused) await play();
+      if (autoplay) await play();
     } catch (e: any) {
       console.error("load", e);
       setPlayError(e?.message ? `Couldn't start playback: ${e.message}` : `Couldn't start playback (${e?.code ?? "error"})`);
     }
-  }));
+  }
+
+  // ---------- Audio only ----------
+  // Switching reloads the same stream with or without video at the current position (a second or so of rebuffering).
+  const toggleAudioOnly = async () => {
+    const next = !prefs.audioOnly();
+    prefs.setAudioOnly(next);
+    toast(next ? "Audio only: the screen can turn off" : "Video on", "info", 2000);
+    if (!usingShaka() || !props.source) return; // direct files: video can't be dropped, only hidden
+    const t = seekTarget() ?? el.currentTime;
+    const resume = !el.paused || waiting();
+    await loadSource(props.source, t, resume);
+  };
 
   async function play() {
     try {
@@ -349,6 +376,8 @@ export default function VideoPlayer(props: {
     set("seekforward", (d) => seekBy(d.seekOffset ?? 10));
     set("seekto", (d) => { if (d.seekTime != null) seekTo(d.seekTime); });
     set("stop", () => player.close());
+    set("nexttrack", props.onNext ? () => props.onNext!() : null);
+    set("previoustrack", () => seekTo(0));
   });
   const updatePositionState = () => {
     if (!("mediaSession" in navigator) || !isFinite(el.duration) || el.duration <= 0) return;
@@ -358,7 +387,8 @@ export default function VideoPlayer(props: {
   // ---------- Screen Wake Lock while playing ----------
   let wakeLock: any = null;
   const syncWakeLock = async () => {
-    const want = playing() && document.visibilityState === "visible";
+    // Audio only: no screen wake lock, so the screen can turn off while it keeps playing.
+    const want = playing() && document.visibilityState === "visible" && !prefs.audioOnly();
     try {
       if (want && !wakeLock && (navigator as any).wakeLock) {
         wakeLock = await (navigator as any).wakeLock.request("screen");
@@ -368,7 +398,7 @@ export default function VideoPlayer(props: {
       }
     } catch { wakeLock = null; }
   };
-  createEffect(on(playing, syncWakeLock));
+  createEffect(on([playing, prefs.audioOnly], syncWakeLock));
   document.addEventListener("visibilitychange", syncWakeLock);
   onCleanup(() => { document.removeEventListener("visibilitychange", syncWakeLock); wakeLock?.release?.(); });
 
@@ -399,6 +429,8 @@ export default function VideoPlayer(props: {
       case "m": el.muted = !el.muted; poke(); break;
       case "c": toggleCaptions(); break;
       case "i": togglePip(); break;
+      case "a": toggleAudioOnly(); break;
+      case "N": props.onNext?.(); break;
       case ">": setSpeed(SPEEDS[Math.min(SPEEDS.length - 1, SPEEDS.indexOf(rate()) + 1)] ?? 1); break;
       case "<": setSpeed(SPEEDS[Math.max(0, SPEEDS.indexOf(rate()) - 1)] ?? 1); break;
       case "Escape": if (menu()) setMenu(null); break;
@@ -502,7 +534,7 @@ export default function VideoPlayer(props: {
         onPlay={() => { setPlaying(true); player.setPlaying(true); }}
         onPause={() => { setPlaying(false); player.setPlaying(false); setTime(el.currentTime); reportProgress(true); }}
         onWaiting={() => setWaiting(true)}
-        onPlaying={() => setWaiting(false)}
+        onPlaying={() => { setWaiting(false); player.setStarted(true); }}
         onCanPlay={() => setWaiting(false)}
         onSeeking={() => setWaiting(true)}
         onSeeked={() => { setWaiting(false); setSeekTarget(null); setTime(el.currentTime); updatePositionState(); }}
@@ -514,6 +546,16 @@ export default function VideoPlayer(props: {
         onEnded={() => { setPlaying(false); reportProgress(true); props.onEnded?.(); }}
         onError={() => { if (!shakaPlayer?.getLoadMode?.()) setPlayError("This video couldn't be played."); }}
       />
+
+      <Show when={prefs.audioOnly() && props.source}>
+        <div class="vp-audio-cover" aria-hidden="true">
+          <Show when={props.poster}><img class="vp-audio-bg" src={props.poster} alt="" referrerpolicy="no-referrer" /></Show>
+          <div class="vp-audio-art">
+            <Show when={props.poster}><img src={props.poster} alt="" referrerpolicy="no-referrer" /></Show>
+          </div>
+          <Show when={!props.mini}><span class="vp-audio-label"><Icon name="headphones" size={16} /> Audio only</span></Show>
+        </div>
+      </Show>
 
       <div class="vp-surface" onPointerUp={onSurfaceTap} />
 
@@ -544,7 +586,12 @@ export default function VideoPlayer(props: {
           <div class="vp-top">
             <button class="icon-btn" aria-label="Minimize" title="Minimize" onClick={() => (fullscreen() ? toggleFullscreen() : player.minimize())}><Icon name="down" /></button>
             <div class="vp-title">{fullscreen() ? props.video?.name : ""}</div>
-            <Show when={pipSupported()}>
+            <button class="vp-btn vp-audio-btn" classList={{ on: prefs.audioOnly() }} aria-pressed={prefs.audioOnly()}
+              aria-label={prefs.audioOnly() ? "Switch back to video" : "Audio only"} title={prefs.audioOnly() ? "Back to video (a)" : "Audio only — screen can turn off (a)"} onClick={() => { toggleAudioOnly(); poke(); }}>
+              <Icon name={prefs.audioOnly() ? "video" : "headphones"} /><span class="vp-btn-label">{prefs.audioOnly() ? "Video" : "Audio"}</span>
+            </button>
+            <QueueButton />
+            <Show when={pipSupported() && !prefs.audioOnly()}>
               <button class="icon-btn" aria-label="Picture in picture" title="Picture in picture (i)" onClick={togglePip}><Icon name="pip" /></button>
             </Show>
           </div>
@@ -612,6 +659,11 @@ export default function VideoPlayer(props: {
               </span>
               <div class="spacer" />
 
+              <Show when={props.onNext}>
+                <button class="icon-btn" aria-label="Next video" title={props.nextTitle ? `Next: ${props.nextTitle} (Shift+N)` : "Next (Shift+N)"} onClick={() => { props.onNext!(); poke(); }}>
+                  <Icon name="skip" />
+                </button>
+              </Show>
               <Show when={captionTracks().length > 0}>
                 <button class="vp-btn" classList={{ on: currentSubtitleIndex() >= 0 }} aria-label="Captions" title="Captions (c)" aria-expanded={menu() === "captions"} onClick={() => openMenu("captions")}>
                   <Icon name="captions" />

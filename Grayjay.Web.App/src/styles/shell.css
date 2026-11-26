@@ -61,6 +61,9 @@ html:has(.watch[data-mode="full"]) .tabbar { visibility: hidden; }
 }
 .toast.error { background: var(--danger); color: #fff; border-radius: var(--radius); }
 @keyframes toast-in { from { transform: translateY(12px); opacity: 0; } }
+.toast.has-action { display: flex; align-items: center; gap: 14px; pointer-events: auto; padding-right: 8px; }
+.toast-action { border: 0; background: none; color: var(--accent); font-weight: 700; padding: 4px 10px; border-radius: 999px; cursor: pointer; }
+@media (prefers-color-scheme: dark) { .toast-action { color: #0a84ff; } }
 
 .update-banner {
   position: fixed; z-index: 90; left: 50%; transform: translateX(-50%); top: calc(var(--safe-top) + 8px);

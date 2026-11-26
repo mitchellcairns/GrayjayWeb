@@ -2,6 +2,7 @@ import { JSX, createEffect, on, onMount } from "solid-js";
 import { A, useLocation, useNavigate, useSearchParams } from "@solidjs/router";
 import { setup } from "../api";
 import CustomDialogs from "./CustomDialogs";
+import GlobalSheets from "../components/GlobalSheets";
 import Icon from "../components/Icon";
 import Toasts from "../components/Toasts";
 import WatchOverlay from "../player/WatchOverlay";
@@ -51,6 +52,7 @@ export default function Shell(props: { children?: JSX.Element }) {
       {props.children}
 
       <WatchOverlay />
+      <GlobalSheets />
 
       <nav class="tabbar" aria-label="Main" hidden={isSetup()}>
         <A href="/" class="rail-logo" aria-label="Home"><img src="/app/logo.svg" alt="" width="30" height="30" /></A>

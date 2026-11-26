@@ -231,3 +231,11 @@ export const sync = {
 export const customDialogs = {
   action: (id: string, action: string, data: unknown = null) => post(`/dialog/DialogRespondCustom?id=${q(id)}&actionName=${q(action)}`, data),
 };
+
+// [GrayjayWeb] Hidden creators: filtered out of feeds on every device.
+export interface HiddenCreator { url: string; name?: string; thumbnail?: string; platform?: string; id?: string; hiddenAt?: string }
+export const hiddenCreators = {
+  list: () => get<HiddenCreator[]>("/web/hidden/List"),
+  add: (c: HiddenCreator) => post("/web/hidden/Add", c),
+  remove: (c: HiddenCreator) => post("/web/hidden/Remove", c),
+};

@@ -1,9 +1,13 @@
-import { Match, Show, Switch } from "solid-js";
+import { Match, Show, Switch, createMemo, createSignal, onCleanup } from "solid-js";
 import { A } from "@solidjs/router";
 import { Content, ContentType } from "../api";
 import { bestThumbnail, formatAgo, formatCount, formatDuration, formatViews, joinDot } from "../lib/format";
 import { channelHref } from "../lib/nav";
 import { player } from "../player/store";
+import { queue } from "../player/queue";
+import { display, frameUrls } from "../lib/display";
+import { ui } from "../lib/ui";
+import { toast } from "./Toasts";
 import Icon from "./Icon";
 import "./ContentCard.css";
 
@@ -18,11 +22,46 @@ export function Avatar(props: { src?: string; name?: string; size?: number }) {
   );
 }
 
-function Thumb(props: { src?: string; duration?: number; live?: boolean; progress?: number }) {
+const finePointer = matchMedia("(pointer: fine)").matches;
+
+/**
+ * Preview image. With "Video frames" (default) YouTube videos show a still from inside the video instead of the
+ * creator's thumbnail, and on hover (mouse) it steps through stills from ~25/50/75%. Falls back to the thumbnail.
+ */
+function Thumb(props: { src?: string; videoUrl?: string; duration?: number; live?: boolean; progress?: number; queueItem?: Content }) {
+  const [failed, setFailed] = createSignal(false);
+  const [frame, setFrame] = createSignal(0);
+  const frames = createMemo(() => (display.preview() === "frames" && !props.live && !failed() ? frameUrls(props.videoUrl) : null));
+  let timer: number | undefined;
+  const startCycle = () => {
+    const f = frames(); if (!f || !finePointer) return;
+    f.forEach((u) => { const i = new Image(); i.referrerPolicy = "no-referrer"; i.src = u; });
+    clearInterval(timer);
+    timer = window.setInterval(() => setFrame((n) => (n + 1) % f.length), 750);
+  };
+  const stopCycle = () => { clearInterval(timer); setFrame(0); };
+  onCleanup(() => clearInterval(timer));
+  const src = () => frames()?.[frame()] ?? props.src;
+
+  const inQueue = () => !!props.queueItem && queue.has(props.queueItem.url);
+  const toggleQueue = (e: MouseEvent) => {
+    e.preventDefault(); e.stopPropagation();
+    const added = queue.toggle(props.queueItem!);
+    toast(added ? "Added to queue" : "Removed from queue", "info", 1800);
+  };
+
   return (
-    <div class="thumb">
-      <Show when={props.src}>
-        <img src={props.src} alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" />
+    <div class="thumb" onMouseEnter={startCycle} onMouseLeave={stopCycle}>
+      <Show when={src()}>
+        <img src={src()} alt="" loading="lazy" decoding="async" fetchpriority="low" referrerpolicy="no-referrer"
+          onError={() => { if (frames()) setFailed(true); }} />
+      </Show>
+      <Show when={props.queueItem}>
+        <button class="thumb-queue" classList={{ on: inQueue() }} aria-pressed={inQueue()}
+          aria-label={inQueue() ? "Remove from queue" : "Add to queue"} title={inQueue() ? "Remove from queue" : "Add to queue"}
+          onClick={toggleQueue} onPointerUp={(e) => e.stopPropagation()}>
+          <Icon name={inQueue() ? "queued" : "queueAdd"} size={18} />
+        </button>
       </Show>
       <Show when={props.live}>
         <span class="badge live">LIVE</span>
@@ -42,7 +81,7 @@ export function SkeletonCard(props: { layout?: "grid" | "row" }) {
     <div class={`card-item ${props.layout ?? "grid"}`} aria-hidden="true">
       <div class="thumb skeleton" />
       <div class="meta">
-        <Show when={(props.layout ?? "grid") === "grid"}><div class="skeleton" style={{ width: "36px", height: "36px", "border-radius": "50%", flex: "none" }} /></Show>
+        <Show when={(props.layout ?? "grid") === "grid"}><div class="skeleton sk-avatar" style={{ width: "36px", height: "36px", "border-radius": "50%", flex: "none" }} /></Show>
         <div style={{ flex: 1 }}>
           <div class="skeleton" style={{ height: "14px", width: "90%", "margin-bottom": "8px" }} />
           <div class="skeleton" style={{ height: "12px", width: "55%" }} />
@@ -53,7 +92,7 @@ export function SkeletonCard(props: { layout?: "grid" | "row" }) {
 }
 
 /** One piece of content from any source. Layout "grid" for feeds, "row" for compact lists (recommendations, search on mobile). */
-export default function ContentCard(props: { item: Content; layout?: "grid" | "row"; progress?: number; hideAuthor?: boolean }) {
+export default function ContentCard(props: { item: Content; layout?: "grid" | "row"; progress?: number; hideAuthor?: boolean; noQueue?: boolean; noMenu?: boolean }) {
   const layout = () => props.layout ?? "grid";
   const item = () => props.item;
   const open = (e: MouseEvent) => {
@@ -65,7 +104,8 @@ export default function ContentCard(props: { item: Content; layout?: "grid" | "r
     <Switch fallback={<SkeletonCard layout={layout()} />}>
       <Match when={item().contentType === ContentType.MEDIA || item().contentType === ContentType.NESTED_VIDEO}>
         <a class={`card-item ${layout()}`} href={`?watch=${encodeURIComponent(item().url)}`} onClick={open}>
-          <Thumb src={bestThumbnail(item().thumbnails ?? item().contentThumbnails, layout() === "row" ? 320 : 640)} duration={item().duration} live={item().isLive} progress={props.progress} />
+          <Thumb src={bestThumbnail(item().thumbnails ?? item().contentThumbnails, layout() === "row" ? 320 : 640)} videoUrl={item().url}
+            duration={item().duration} live={item().isLive} progress={props.progress} queueItem={props.noQueue ? undefined : item()} />
           <div class="meta">
             <Show when={layout() === "grid" && !props.hideAuthor}>
               <A href={channelHref(item().author?.url)} onClick={(e) => e.stopPropagation()} class="avatar-link" aria-label={item().author?.name}>
@@ -78,6 +118,12 @@ export default function ContentCard(props: { item: Content; layout?: "grid" | "r
                 {joinDot(!props.hideAuthor && item().author?.name, item().isLive ? (item().viewCount ? `${formatCount(item().viewCount)} watching` : "Live") : formatViews(item().viewCount), !item().isLive && formatAgo(item().dateTime))}
               </p>
             </div>
+            <Show when={!props.noMenu}>
+              <button class="card-more" aria-label="More options" title="More"
+                onClick={(e) => { e.preventDefault(); e.stopPropagation(); ui.setCardMenu(item()); }}>
+                <Icon name="more" size={18} />
+              </button>
+            </Show>
           </div>
         </a>
       </Match>

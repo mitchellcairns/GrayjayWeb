@@ -7,6 +7,7 @@ import Icon from "../components/Icon";
 import Sheet from "../components/Sheet";
 import PairDevice from "../components/PairDevice";
 import PlaybackSettings from "../components/PlaybackSettings";
+import { FeedLookSettings, HiddenCreatorsSettings } from "../components/FeedSettings";
 import { toast, toastError } from "../components/Toasts";
 import PageHeader from "../shell/PageHeader";
 
@@ -67,6 +68,12 @@ export default function Settings() {
 
         <h2 class="section-title">Playback quality <span class="faint" style={{ "font-size": "13px", "font-weight": 500 }}>this device</span></h2>
         <PlaybackSettings />
+
+        <h2 class="section-title">Feeds <span class="faint" style={{ "font-size": "13px", "font-weight": 500 }}>this device</span></h2>
+        <FeedLookSettings />
+
+        <h2 class="section-title" id="hidden-creators">Hidden creators</h2>
+        <HiddenCreatorsSettings />
 
         <Show when={!standalone}>
           <h2 class="section-title">Install the app</h2>

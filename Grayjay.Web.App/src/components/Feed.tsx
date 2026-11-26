@@ -1,4 +1,6 @@
-import { For, JSX, Show, createEffect, onCleanup } from "solid-js";
+import { For, JSX, Show, createEffect, createMemo, onCleanup } from "solid-js";
+import { display } from "../lib/display";
+import { hidden } from "../lib/hidden";
 import type { Content } from "../api";
 import type { Pager } from "../lib/pager";
 import ContentCard, { SkeletonCard } from "./ContentCard";
@@ -10,9 +12,13 @@ export default function Feed(props: {
   layout?: "grid" | "list";
   empty?: JSX.Element;
   hideAuthor?: boolean;
+  /** Show creators you've hidden (a channel's own page). */
+  allowHidden?: boolean;
 }) {
   let sentinel!: HTMLDivElement;
-  const layout = () => props.layout ?? "grid";
+  const layout = () => props.layout ?? (display.density() === "list" ? "list" : "grid");
+  const gridClass = () => (layout() === "grid" ? `feed-grid ${display.density() === "large" ? "large" : "compact"}` : "feed-list");
+  const items = createMemo(() => (props.allowHidden ? props.pager.items() : props.pager.items().filter((i) => !hidden.isHidden(i.author))));
 
   createEffect(() => {
     const io = new IntersectionObserver((entries) => {
@@ -22,8 +28,9 @@ export default function Feed(props: {
     onCleanup(() => io.disconnect());
   });
 
-  // If the first page doesn't fill the screen, keep loading.
+  // If the first page doesn't fill the screen (or hidden creators emptied it), keep loading.
   createEffect(() => {
+    items();
     const p = props.pager;
     if (p.loaded() && !p.loading() && p.hasMore() && sentinel) {
       const r = sentinel.getBoundingClientRect();
@@ -33,8 +40,8 @@ export default function Feed(props: {
 
   return (
     <>
-      <div class={layout() === "grid" ? "feed-grid" : "feed-list"}>
-        <For each={props.pager.items()}>
+      <div class={gridClass()}>
+        <For each={items()}>
           {(item) => <ContentCard item={item} layout={layout() === "grid" ? "grid" : "row"} hideAuthor={props.hideAuthor} />}
         </For>
         <Show when={!props.pager.loaded() && props.pager.loading()}>
@@ -52,7 +59,7 @@ export default function Feed(props: {
           <button class="btn small" onClick={() => props.pager.reload()}>Try again</button>
         </div>
       </Show>
-      <Show when={props.pager.loaded() && !props.pager.loading() && !props.pager.error() && props.pager.items().length === 0}>
+      <Show when={props.pager.loaded() && !props.pager.loading() && !props.pager.error() && items().length === 0}>
         {props.empty ?? <div class="empty"><h3>Nothing here yet</h3></div>}
       </Show>
     </>

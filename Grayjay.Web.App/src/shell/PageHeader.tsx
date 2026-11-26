@@ -1,6 +1,7 @@
 import { JSX, Show, createSignal, onCleanup, onMount } from "solid-js";
 import { A, useNavigate } from "@solidjs/router";
 import Icon from "../components/Icon";
+import { QueueButton } from "../components/GlobalSheets";
 
 /**
  * Translucent top bar. iOS standalone PWAs have no browser chrome or back gesture, so pages deeper than a tab
@@ -28,6 +29,7 @@ export default function PageHeader(props: { title?: JSX.Element; back?: boolean;
       </Show>
       {props.children}
       <div class="spacer" />
+      <QueueButton />
       {props.actions}
     </header>
   );

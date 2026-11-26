@@ -3,6 +3,7 @@ import { batch, createRoot, createSignal } from "solid-js";
 import { Content, SourceDescriptor, VideoDetails, details, history as historyApi } from "../api";
 import { pickVideoIndex, targetHeight } from "../lib/quality";
 import { stored } from "../lib/stored";
+import { queue } from "./queue";
 export { stored };
 
 export type PlayerMode = "closed" | "full" | "mini";
@@ -19,7 +20,9 @@ function createPrefs() {
   const [mini, setMini] = stored<MiniRect | null>("gj.mini", null);
   const [volume, setVolume] = stored("gj.volume", 1);
   const [muted, setMuted] = stored("gj.muted", false);
-  return { rate, setRate, captions, setCaptions, mini, setMini, volume, setVolume, muted, setMuted };
+  /** Audio only: fetch no video (saves data, lets the screen turn off). Remembered, so a podcast queue stays audio. */
+  const [audioOnly, setAudioOnly] = stored("gj.audioOnly", false);
+  return { rate, setRate, captions, setCaptions, mini, setMini, volume, setVolume, muted, setMuted, audioOnly, setAudioOnly };
 }
 export const prefs = createRoot(createPrefs);
 
@@ -68,6 +71,8 @@ function createPlayerStore() {
   const [error, setError] = createSignal<string | null>(null);
   const [videoEl, setVideoEl] = createSignal<HTMLVideoElement | null>(null);
   const [playing, setPlaying] = createSignal(false);
+  /** True once the current video actually started playing (frames moving), so lower-priority loads can begin. */
+  const [started, setStarted] = createSignal(false);
 
   let nav: NavBridge | null = null;
   let openedViaPush = false;
@@ -75,11 +80,13 @@ function createPlayerStore() {
 
   async function load(target: string) {
     const token = ++loadToken;
+    queue.remove(target); // playing something you'd queued takes it off the queue
     batch(() => {
       setLoading(true);
       setError(null);
       setVideo(null);
       setSource(null);
+      setStarted(false);
     });
     try {
       const [{ video: v, superseded }, position] = await Promise.all([
@@ -124,7 +131,7 @@ function createPlayerStore() {
   }
 
   return {
-    mode, url, preview, video, source, startAt, loading, error, videoEl, setVideoEl, playing, setPlaying,
+    mode, url, preview, video, source, startAt, loading, error, videoEl, setVideoEl, playing, setPlaying, started, setStarted,
 
     bindNavigation(bridge: NavBridge) { nav = bridge; },
 
@@ -141,6 +148,20 @@ function createPlayerStore() {
       setMode("full");
       openedViaPush = true;
       nav?.setWatchParam(target, false);
+    },
+
+    /**
+     * Switch to another video without changing full/mini (queue, autoplay, lock-screen "next"). Opens full screen if
+     * nothing is playing. Replaces the ?watch= entry rather than stacking history.
+     */
+    playNow(target: string, previewItem?: Content) {
+      if (mode() === "closed") { this.open(target, previewItem); return; }
+      if (target !== url()) {
+        unlock();
+        batch(() => { setPreview(previewItem ?? null); setUrl(target); });
+        load(target);
+      }
+      if (mode() === "full") nav?.setWatchParam(target, true);
     },
 
     /** Called when the URL's ?watch= param changes (deep link, back/forward). */

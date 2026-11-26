@@ -8,6 +8,8 @@ import { Avatar } from "../components/ContentCard";
 import RichText from "../components/RichText";
 import { toast, toastError } from "../components/Toasts";
 import PageHeader from "../shell/PageHeader";
+import Icon from "../components/Icon";
+import { hidden } from "../lib/hidden";
 import "./Channel.css";
 
 export default function Channel() {
@@ -33,6 +35,22 @@ export default function Channel() {
     } catch (e) { toastError(e); }
   };
 
+  // Hide/unhide this creator everywhere (Discover, Subscriptions, search, Up next).
+  const author = () => ({ id: ch()?.id ?? { platform: "" }, name: ch()?.name ?? "", url: canonicalUrl(), thumbnail: ch()?.thumbnail });
+  const isHidden = () => hidden.isHidden(author()) || hidden.isHidden({ ...author(), url: url() });
+  const toggleHidden = async () => {
+    try {
+      if (isHidden()) {
+        const match = hidden.list().find((c) => [url(), canonicalUrl()].some((u) => u.toLowerCase() === c.url.toLowerCase()) || (c.id && c.id === ch()?.id?.value));
+        await hidden.unhide(match ?? hidden.fromAuthor(author()));
+        toast(`${ch()?.name ?? "Creator"} is visible again`);
+      } else {
+        await hidden.hide(author());
+        toast(`Hidden ${ch()?.name ?? "creator"} from your feeds`);
+      }
+    } catch (e) { toastError(e); }
+  };
+
   return (
     <>
       <PageHeader back title={ch()?.name} />
@@ -51,6 +69,9 @@ export default function Channel() {
           <button class={`btn ${subscribed() ? "" : "primary"}`} style={{ flex: 1, "max-width": "320px" }} onClick={toggle} disabled={subscribed.loading}>
             {subscribed() ? "Subscribed" : "Subscribe"}
           </button>
+          <button class="btn" onClick={toggleHidden} disabled={!ch()} title={isHidden() ? "Show this creator in your feeds again" : "Never show this creator in Discover, Subscriptions, search or Up next"}>
+            <Icon name={isHidden() ? "show" : "hide"} size={18} /> {isHidden() ? "Unhide" : "Hide"}
+          </button>
           <a class="btn" href={url()} target="_blank" rel="noreferrer">Open</a>
         </div>
         <Show when={ch.error}><div class="feed-status">{(ch.error as Error).message}</div></Show>
@@ -61,8 +82,8 @@ export default function Channel() {
           <button role="tab" aria-selected={tab() === "about"} onClick={() => setTab("about")}>About</button>
         </div>
 
-        <Show when={tab() === "videos"}><Feed pager={videos} hideAuthor /></Show>
-        <Show when={tab() === "playlists"}><Feed pager={playlists} hideAuthor /></Show>
+        <Show when={tab() === "videos"}><Feed pager={videos} hideAuthor allowHidden /></Show>
+        <Show when={tab() === "playlists"}><Feed pager={playlists} hideAuthor allowHidden /></Show>
         <Show when={tab() === "about"}>
           <div class="card" style={{ "white-space": "pre-wrap", "overflow-wrap": "anywhere" }}>
             <RichText text={ch()?.description || "No description."} />
