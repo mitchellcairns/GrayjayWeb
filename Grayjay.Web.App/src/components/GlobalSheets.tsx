@@ -1,4 +1,4 @@
-import { For, Show } from "solid-js";
+import { For, Show, createSignal, onCleanup } from "solid-js";
 import { useNavigate } from "@solidjs/router";
 import type { Content } from "../api";
 import { bestThumbnail, formatDuration, joinDot } from "../lib/format";
@@ -60,13 +60,28 @@ function CardMenu() {
   );
 }
 
-function QueueRow(props: { item: Content; index: number; count: number }) {
+interface DragState { from: number; over: number; dy: number }
+
+function QueueRow(props: {
+  item: Content; index: number; count: number; drag: DragState | null; shift: number; settling: boolean;
+  onGrip: (e: PointerEvent, index: number) => void;
+}) {
   const play = () => { const it = queue.take(props.item.url); if (it) player.playNow(it.url, it); };
+  const dragging = () => props.drag?.from === props.index;
+  const onKey = (e: KeyboardEvent) => {
+    if (e.key === "ArrowUp" && props.index > 0) { e.preventDefault(); queue.move(props.index, -1); }
+    if (e.key === "ArrowDown" && props.index < props.count - 1) { e.preventDefault(); queue.move(props.index, 1); }
+  };
   return (
-    <div class="queue-row">
+    <div class="queue-row" data-queue-row classList={{ dragging: dragging(), settling: props.settling }}
+      style={{ transform: dragging() ? `translateY(${props.drag!.dy}px)` : props.shift ? `translateY(${props.shift}px)` : undefined }}>
+      <button class="queue-grip" aria-label={`Reorder ${props.item.name} (drag, or use the arrow keys)`} title="Drag to reorder"
+        onPointerDown={(e) => props.onGrip(e, props.index)} onKeyDown={onKey}>
+        <Icon name="grip" size={20} />
+      </button>
       <button class="queue-open" onClick={play} aria-label={`Play ${props.item.name}`}>
         <div class="queue-thumb">
-          <Show when={bestThumbnail(props.item.thumbnails, 320)}><img src={bestThumbnail(props.item.thumbnails, 320)} alt="" loading="lazy" referrerpolicy="no-referrer" /></Show>
+          <Show when={bestThumbnail(props.item.thumbnails, 320)}><img src={bestThumbnail(props.item.thumbnails, 320)} alt="" loading="lazy" referrerpolicy="no-referrer" draggable={false} /></Show>
           <Show when={props.item.duration}><span class="badge">{formatDuration(props.item.duration)}</span></Show>
         </div>
         <div class="queue-text">
@@ -74,19 +89,101 @@ function QueueRow(props: { item: Content; index: number; count: number }) {
           <div class="sub">{props.item.author?.name}</div>
         </div>
       </button>
-      <div class="queue-ctl">
-        <button class="icon-btn" aria-label="Move up" disabled={props.index === 0} onClick={() => queue.move(props.index, -1)}><Icon name="up" size={18} /></button>
-        <button class="icon-btn" aria-label="Move down" disabled={props.index === props.count - 1} onClick={() => queue.move(props.index, 1)}><Icon name="down" size={18} /></button>
-      </div>
       <button class="icon-btn" aria-label="Remove from queue" onClick={() => queue.remove(props.item.url)}><Icon name="close" size={18} /></button>
     </div>
   );
 }
 
+/**
+ * Queue with press-and-drag reordering on the grip handle (mouse and touch). The dragged row follows the pointer,
+ * the others slide out of the way, and the list scrolls when you drag near its top or bottom edge.
+ */
 export function QueueList() {
+  let list!: HTMLDivElement;
+  const [drag, setDrag] = createSignal<DragState | null>(null);
+  const [settling, setSettling] = createSignal(false);
+  let mids: number[] = [], heights: number[] = [], gap = 6;
+  let startY = 0, startScroll = 0, pointerY = 0, scroller: HTMLElement | null = null, raf = 0;
+
+  const scrollParent = (el: HTMLElement | null): HTMLElement => {
+    for (let n = el?.parentElement; n; n = n.parentElement) {
+      const o = getComputedStyle(n).overflowY;
+      if ((o === "auto" || o === "scroll") && n.scrollHeight > n.clientHeight) return n;
+    }
+    return document.scrollingElement as HTMLElement;
+  };
+  const scrollTop = () => scroller?.scrollTop ?? 0;
+
+  const update = () => {
+    const d = drag(); if (!d) return;
+    const dy = pointerY - startY + (scrollTop() - startScroll);
+    const center = mids[d.from] + dy;
+    let over = 0;
+    for (let i = 0; i < mids.length; i++) if (i !== d.from && mids[i] < center) over++;
+    setDrag({ from: d.from, over, dy });
+  };
+
+  // Auto-scroll while the pointer is near the top/bottom edge of the scrolling area.
+  const autoScroll = () => {
+    if (!drag() || !scroller) return;
+    const isDoc = scroller === document.scrollingElement;
+    const top = isDoc ? 0 : scroller.getBoundingClientRect().top;
+    const bottom = isDoc ? innerHeight : scroller.getBoundingClientRect().bottom;
+    const edge = 56;
+    const v = pointerY < top + edge ? -Math.ceil((top + edge - pointerY) / 6) : pointerY > bottom - edge ? Math.ceil((pointerY - (bottom - edge)) / 6) : 0;
+    if (v) { scroller.scrollTop += v; update(); }
+    raf = requestAnimationFrame(autoScroll);
+  };
+
+  const onGrip = (e: PointerEvent, index: number) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    const rows = [...list.querySelectorAll<HTMLElement>("[data-queue-row]")];
+    const rects = rows.map((r) => r.getBoundingClientRect());
+    scroller = scrollParent(list);
+    startScroll = scrollTop();
+    mids = rects.map((r) => r.top + r.height / 2);
+    heights = rects.map((r) => r.height);
+    gap = rects.length > 1 ? Math.max(0, rects[1].top - rects[0].bottom) : 6;
+    startY = pointerY = e.clientY;
+    setDrag({ from: index, over: index, dy: 0 });
+    navigator.vibrate?.(8);
+    const target = e.currentTarget as HTMLElement;
+    try { target.setPointerCapture(e.pointerId); } catch { }
+    const move = (ev: PointerEvent) => { pointerY = ev.clientY; update(); };
+    const end = () => {
+      target.removeEventListener("pointermove", move);
+      target.removeEventListener("pointerup", end);
+      target.removeEventListener("pointercancel", end);
+      cancelAnimationFrame(raf);
+      const d = drag();
+      // Reorder and drop the transforms in the same frame, without transitions, so nothing jumps.
+      setSettling(true);
+      setDrag(null);
+      if (d && d.over !== d.from) queue.moveTo(d.from, d.over);
+      requestAnimationFrame(() => requestAnimationFrame(() => setSettling(false)));
+    };
+    target.addEventListener("pointermove", move);
+    target.addEventListener("pointerup", end);
+    target.addEventListener("pointercancel", end);
+    raf = requestAnimationFrame(autoScroll);
+  };
+  onCleanup(() => cancelAnimationFrame(raf));
+
+  // How far each non-dragged row slides to make room.
+  const shiftFor = (i: number) => {
+    const d = drag(); if (!d || i === d.from) return 0;
+    const space = (heights[d.from] ?? 0) + gap;
+    if (d.from < d.over && i > d.from && i <= d.over) return -space;
+    if (d.over < d.from && i >= d.over && i < d.from) return space;
+    return 0;
+  };
+
   return (
-    <div class="queue-list">
-      <For each={queue.items()}>{(it, i) => <QueueRow item={it} index={i()} count={queue.count()} />}</For>
+    <div class="queue-list" ref={list} classList={{ "is-dragging": !!drag() }}>
+      <For each={queue.items()}>{(it, i) => (
+        <QueueRow item={it} index={i()} count={queue.count()} drag={drag()} shift={shiftFor(i())} settling={settling()} onGrip={onGrip} />
+      )}</For>
     </div>
   );
 }

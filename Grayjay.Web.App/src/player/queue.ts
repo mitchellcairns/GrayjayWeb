@@ -62,6 +62,16 @@ export const queue = createRoot(() => {
       [l[index], l[j]] = [l[j], l[index]];
       setItems(l);
     },
+    /** Drag-and-drop: take the item at `from` and put it at `to` (index in the list after removal). */
+    moveTo(from: number, to: number) {
+      const l = [...items()];
+      if (from < 0 || from >= l.length) return;
+      const [it] = l.splice(from, 1);
+      const j = Math.max(0, Math.min(l.length, to));
+      if (j === from) return;
+      l.splice(j, 0, it);
+      setItems(l);
+    },
     clear() { setItems([]); },
     /** Removes and returns the next item. */
     shift(): Content | undefined {

@@ -22,9 +22,21 @@
 .queue-text { min-width: 0; }
 .queue-text .title { font-size: 14px; font-weight: 600; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .queue-text .sub { font-size: 12px; color: var(--text-2); }
-.queue-ctl { display: flex; flex-direction: column; }
-.queue-ctl .icon-btn { width: 30px; height: 24px; border-radius: 6px; }
-.queue-ctl .icon-btn:disabled { opacity: 0.3; }
+.queue-row { position: relative; transition: transform 0.18s var(--ease), box-shadow 0.18s, background 0.18s; }
+.queue-row.settling, .queue-row.dragging { transition: none; }
+.queue-row.dragging {
+  z-index: 2; background: var(--bg-elev-2); box-shadow: 0 10px 30px rgb(0 0 0 / 0.35); border-radius: var(--radius);
+  outline: 1px solid color-mix(in srgb, var(--accent) 60%, transparent);
+}
+.queue-list.is-dragging { user-select: none; -webkit-user-select: none; }
+.queue-list.is-dragging .queue-row:not(.dragging) { pointer-events: none; }
+/* The handle: big enough to grab with a thumb, and touch-action none so dragging doesn't scroll the page. */
+.queue-grip {
+  flex: none; width: 36px; align-self: stretch; min-height: 44px; display: grid; place-items: center; border: 0; background: none;
+  color: var(--text-3); cursor: grab; touch-action: none; border-radius: var(--radius-s); -webkit-touch-callout: none;
+}
+.queue-grip:hover { color: var(--text); background: var(--bg-hover); }
+.queue-row.dragging .queue-grip { cursor: grabbing; color: var(--accent); }
 .later-row { display: flex; align-items: flex-start; gap: 4px; }
 .later-row > .card-item { flex: 1; min-width: 0; }
 .watch-actions .btn.is-on { color: var(--accent); }
