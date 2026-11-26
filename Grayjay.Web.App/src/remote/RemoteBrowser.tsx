@@ -1,6 +1,6 @@
 import { For, Show, createSignal, onCleanup, onMount } from "solid-js";
 import { Portal } from "solid-js/web";
-import type { RemoteBrowserSession } from "../api";
+import { RemoteBrowserSession, remoteBrowser } from "../api";
 import Icon from "../components/Icon";
 import "./RemoteBrowser.css";
 
@@ -25,6 +25,10 @@ export default function RemoteBrowser(props: { session: RemoteBrowserSession; on
   const [accounts, setAccounts] = createSignal<YtAccount[] | null>(null);
   const [showPage, setShowPage] = createSignal(false);
   const [gotFrame, setGotFrame] = createSignal(false);
+  // The stream drops whenever the phone puts the app in the background (approving a sign-in on the phone, copying a
+  // 2-step code from another app). The server keeps the session for 15 minutes, so reconnect and carry on.
+  const [reconnecting, setReconnecting] = createSignal(false);
+  let closedByUs = false;
   // Sign-in started on the computer running Grayjay opens a real browser window there instead of streaming.
   const headful = !!props.session.headful;
 
@@ -59,10 +63,8 @@ export default function RemoteBrowser(props: { session: RemoteBrowserSession; on
       if (pending) draw();
     };
 
-    ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/RemoteBrowser/${encodeURIComponent(props.session.id)}/Stream`);
-    ws.addEventListener("open", () => { setConnected(true); sendResize(); if (!headful) keyInput?.focus({ preventScroll: true }); });
-    ws.addEventListener("close", () => setConnected(false));
-    ws.addEventListener("message", (ev) => {
+    let retryTimer: number | undefined, attempt = 0;
+    const onMessage = (ev: MessageEvent) => {
       let m: any;
       try { m = JSON.parse(ev.data); } catch { return; }
       switch (m.type) {
@@ -80,14 +82,64 @@ export default function RemoteBrowser(props: { session: RemoteBrowserSession; on
           setShowPage(false);
           break;
         case "closed":
+          closedByUs = true;
           props.onClosed();
           break;
       }
-    });
+    };
+
+    const connect = () => {
+      clearTimeout(retryTimer);
+      if (closedByUs || ws?.readyState === WebSocket.OPEN || ws?.readyState === WebSocket.CONNECTING) return;
+      const sock = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/RemoteBrowser/${encodeURIComponent(props.session.id)}/Stream`);
+      ws = sock;
+      sock.addEventListener("open", () => {
+        attempt = 0;
+        setConnected(true); setReconnecting(false);
+        sendResize();
+        if (!headful) keyInput?.focus({ preventScroll: true });
+      });
+      sock.addEventListener("message", onMessage);
+      sock.addEventListener("close", () => {
+        if (ws !== sock) return;
+        setConnected(false);
+        if (!closedByUs) scheduleReconnect();
+      });
+    };
+    // Before reconnecting, make sure the session still exists: if it's gone, sign-in finished (or timed out) while we
+    // were away, and the window should close.
+    const reconnect = async () => {
+      if (closedByUs) return;
+      setReconnecting(true);
+      try {
+        const open = await remoteBrowser.sessions();
+        if (!open.some((x) => x.id === props.session.id)) { closedByUs = true; props.onClosed(); return; }
+      } catch { /* server unreachable right now: retry below */ }
+      connect();
+    };
+    const scheduleReconnect = () => {
+      clearTimeout(retryTimer);
+      if (document.visibilityState !== "visible") return; // reconnect when the app comes back
+      const delay = Math.min(5000, 400 * 2 ** attempt++);
+      retryTimer = window.setTimeout(reconnect, delay);
+    };
+    const onVisible = () => {
+      if (document.visibilityState === "visible" && ws?.readyState !== WebSocket.OPEN) { attempt = 0; reconnect(); }
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    addEventListener("online", onVisible);
+    connect();
 
     const ro = new ResizeObserver(() => sendResize());
     ro.observe(stage);
-    onCleanup(() => { ro.disconnect(); ws?.close(); });
+    onCleanup(() => {
+      closedByUs = true;
+      clearTimeout(retryTimer);
+      document.removeEventListener("visibilitychange", onVisible);
+      removeEventListener("online", onVisible);
+      ro.disconnect();
+      ws?.close();
+    });
   });
 
   // ---------- Input ----------
@@ -111,8 +163,12 @@ export default function RemoteBrowser(props: { session: RemoteBrowserSession; on
     send({ type: "wheel", x, y, deltaX: e.deltaX, deltaY: e.deltaY });
   };
 
+  let mirror = "";
+  let composing = false;
   const specialKeys = new Set(["Enter", "Backspace", "Tab", "Escape", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Delete", "Home", "End"]);
   const onKeyDown = (e: KeyboardEvent) => {
+    if (e.isComposing || composing) return; // the keyboard is mid-word: the input diff handles it
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "v") return; // let the paste event carry the text
     if (specialKeys.has(e.key) || e.ctrlKey || e.metaKey) {
       e.preventDefault();
       const mods = (e.altKey ? 1 : 0) | (e.ctrlKey ? 2 : 0) | (e.metaKey ? 4 : 0) | (e.shiftKey ? 8 : 0);
@@ -120,23 +176,42 @@ export default function RemoteBrowser(props: { session: RemoteBrowserSession; on
       send({ type: "key", action: "up", key: e.key, code: e.code, keyCode: e.keyCode, modifiers: mods });
     }
   };
-  const onBeforeInput = (e: InputEvent) => {
-    // Covers typing, autocorrect, dictation and password-manager autofill on phones.
-    if (e.inputType === "deleteContentBackward") {
+  // Typing goes through the hidden input and is forwarded as the *difference* between what it held before and now.
+  // Phone keyboards (Gboard, SwiftKey, iOS) build words up in a composition ("t", "te", "tes"…) that can't be
+  // cancelled, so forwarding each event's text would type "ttetes". Diffing works for composition, autocorrect,
+  // dictation, paste and password-manager autofill alike.
+  const backspace = (n: number) => {
+    for (let i = 0; i < n; i++) {
       send({ type: "key", action: "down", key: "Backspace", code: "Backspace", keyCode: 8, modifiers: 0 });
       send({ type: "key", action: "up", key: "Backspace", code: "Backspace", keyCode: 8, modifiers: 0 });
-    } else if (e.data) {
-      send({ type: "text", text: e.data });
     }
-    e.preventDefault();
+  };
+  const syncInput = () => {
+    const now = keyInput.value;
+    let p = 0;
+    while (p < mirror.length && p < now.length && mirror[p] === now[p]) p++;
+    backspace(mirror.length - p);
+    if (now.length > p) send({ type: "text", text: now.slice(p) });
+    mirror = now;
+    // Outside a composition, start fresh each time so the local field never drifts from the page.
+    if (!composing) { keyInput.value = ""; mirror = ""; }
+  };
+  const onBeforeInput = (e: InputEvent) => {
+    // Backspace with nothing local to delete: there'd be no input event, so forward it directly.
+    if (e.inputType === "deleteContentBackward" && keyInput.value === "") {
+      e.preventDefault();
+      backspace(1);
+    }
   };
   const onPaste = (e: ClipboardEvent) => {
     const t = e.clipboardData?.getData("text");
     if (t) send({ type: "text", text: t });
     e.preventDefault();
   };
+  const onCompositionStart = () => { composing = true; };
+  const onCompositionEnd = () => { composing = false; syncInput(); };
 
-  const cancel = () => { send({ type: "close" }); props.onClosed(); };
+  const cancel = () => { send({ type: "close" }); closedByUs = true; props.onClosed(); };
 
   return (
     <Portal>
@@ -204,6 +279,9 @@ export default function RemoteBrowser(props: { session: RemoteBrowserSession; on
           <Show when={!gotFrame()}>
             <div class="rb-loading"><div class="spinner" /><p class="muted">{connected() ? "Opening sign-in page…" : "Connecting to your server…"}</p></div>
           </Show>
+          <Show when={gotFrame() && !connected()}>
+            <div class="rb-loading rb-reconnecting"><div class="spinner" /><p>{reconnecting() ? "Reconnecting…" : "Connection lost. Reconnecting…"}</p></div>
+          </Show>
         </div>
 
         <input
@@ -217,6 +295,9 @@ export default function RemoteBrowser(props: { session: RemoteBrowserSession; on
           aria-label="Type into the page"
           onKeyDown={onKeyDown}
           onBeforeInput={onBeforeInput as any}
+          onInput={syncInput}
+          onCompositionStart={onCompositionStart}
+          onCompositionEnd={onCompositionEnd}
           onPaste={onPaste}
           value=""
         />

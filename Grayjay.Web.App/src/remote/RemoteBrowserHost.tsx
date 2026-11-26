@@ -7,12 +7,20 @@ import RemoteBrowser from "./RemoteBrowser";
 export default function RemoteBrowserHost() {
   const [session, setSession] = createSignal<RemoteBrowserSession | null>(null);
 
-  onMount(async () => {
+  // Show any sign-in window the server has open (also after coming back from the background, when the live
+  // "opened"/"closed" notices may have been missed).
+  const sync = async () => {
     try {
       const open = await remoteBrowser.sessions();
-      if (open?.length) setSession(open[open.length - 1]);
+      const cur = session();
+      if (cur && !open.some((x) => x.id === cur.id)) setSession(null);
+      else if (!cur && open?.length) setSession(open[open.length - 1]);
     } catch { }
-  });
+  };
+  onMount(sync);
+  const onVisible = () => { if (document.visibilityState === "visible") sync(); };
+  document.addEventListener("visibilitychange", onVisible);
+  onCleanup(() => document.removeEventListener("visibilitychange", onVisible));
   const offs = [
     on<RemoteBrowserSession>("RemoteBrowserOpened", (p) => setSession(p.payload)),
     on<{ id: string }>("RemoteBrowserClosed", (p) => { if (session()?.id === p.payload?.id) setSession(null); }),

@@ -21,3 +21,5 @@ dialog.rb::backdrop { background: var(--bg); }
 
 .rb-headful { justify-content: center; text-align: center; align-items: center; }
 .rb-headful .btn { margin-top: 8px; }
+/* Over the last picture while the stream reconnects (e.g. after switching apps to approve a sign-in). */
+.rb-loading.rb-reconnecting { background: rgb(0 0 0 / 0.55); color: #fff; font-weight: 600; }
