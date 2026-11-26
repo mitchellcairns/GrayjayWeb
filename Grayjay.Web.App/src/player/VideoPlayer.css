@@ -135,3 +135,12 @@
 .vp.controls-on .vp-audio-label { opacity: 0; }
 .vp-audio-btn.on { color: #fff; background: rgb(255 255 255 / 0.18); }
 .vp-top .queue-btn { color: #fff; }
+
+/* Installed Android app: "fullscreen" is the player filling the app window (see appFullscreenMode). */
+.vp.app-fullscreen {
+  position: fixed; inset: 0; z-index: 1000; width: 100vw; height: 100dvh; max-height: none; border-radius: 0; background: #000;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+.vp.app-fullscreen video { width: 100%; height: 100%; object-fit: contain; }
+html:has(.vp.app-fullscreen) .tabbar, html:has(.vp.app-fullscreen) .continue-bar { visibility: hidden !important; }
+html:has(.vp.app-fullscreen) .watch { z-index: 60; }

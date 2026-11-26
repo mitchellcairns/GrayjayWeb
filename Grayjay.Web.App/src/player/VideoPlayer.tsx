@@ -23,6 +23,13 @@ function loadShaka() {
 const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
 const canElementFullscreen = !!(document.fullscreenEnabled || (document as any).webkitFullscreenEnabled) && !/iPhone|iPod/.test(navigator.userAgent);
 const finePointer = matchMedia("(pointer: fine)").matches;
+/**
+ * Installed app on Android: Chrome's Fullscreen API shows an "<address> is now full screen. Drag from top and swipe…"
+ * message that can get stuck in installed web apps. There the player fills the app window itself instead (the app is
+ * already chrome-less), and turning the phone sideways enters/leaves it automatically, like a native player.
+ */
+const appFullscreenMode = /Android/.test(navigator.userAgent) &&
+  (matchMedia("(display-mode: standalone)").matches || matchMedia("(display-mode: fullscreen)").matches || matchMedia("(display-mode: minimal-ui)").matches);
 const SPEEDS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 3];
 
 function isStreamType(type?: string) {
@@ -325,7 +332,32 @@ export default function VideoPlayer(props: {
   };
 
   // ---------- Fullscreen / PiP ----------
+  const [appFs, setAppFs] = createSignal(false);
+  let appFsByRotation = false;
+  const setAppFullscreen = async (on: boolean, byRotation = false) => {
+    appFsByRotation = on && byRotation;
+    setAppFs(on);
+    setFullscreen(on);
+    poke();
+    try {
+      if (on && !byRotation && el.videoWidth >= el.videoHeight) await (screen.orientation as any)?.lock?.("landscape");
+      else if (!on) (screen.orientation as any)?.unlock?.();
+    } catch { } // not allowed outside the Fullscreen API on some versions: rotating the phone still works
+  };
+  if (appFullscreenMode) {
+    const landscape = matchMedia("(orientation: landscape)");
+    const onRotate = () => {
+      if (props.mini || player.mode() !== "full") return;
+      if (landscape.matches && !appFs() && el.videoWidth >= el.videoHeight) setAppFullscreen(true, true);
+      else if (!landscape.matches && appFs() && appFsByRotation) setAppFullscreen(false);
+    };
+    landscape.addEventListener("change", onRotate);
+    onCleanup(() => landscape.removeEventListener("change", onRotate));
+  }
+  createEffect(on(() => props.mini, (m) => { if (m && appFs()) setAppFullscreen(false); }));
+
   const toggleFullscreen = async () => {
+    if (appFullscreenMode) { await setAppFullscreen(!appFs()); return; }
     const d = document as any;
     if (document.fullscreenElement || d.webkitFullscreenElement) {
       await (document.exitFullscreen?.() ?? d.webkitExitFullscreen?.());
@@ -520,7 +552,7 @@ export default function VideoPlayer(props: {
     <div
       ref={container}
       class="vp"
-      classList={{ mini: props.mini, "controls-on": controls() || !playing() || !!menu(), fullscreen: fullscreen(), "fine-pointer": finePointer }}
+      classList={{ mini: props.mini, "app-fullscreen": appFs(), "controls-on": controls() || !playing() || !!menu(), fullscreen: fullscreen(), "fine-pointer": finePointer }}
       onPointerMove={(e) => { if (e.pointerType === "mouse" && !props.mini) poke(); }}
       onMouseLeave={() => { if (playing() && !menu()) setControls(false); }}
     >
