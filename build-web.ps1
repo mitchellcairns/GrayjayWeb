@@ -21,7 +21,7 @@ Pop-Location
 
 Write-Host "==> Publishing server ($Rid)" -ForegroundColor Cyan
 if (Test-Path $out) { Remove-Item -Recurse -Force $out }
-dotnet publish (Join-Path $root "Grayjay.Web.Host/Grayjay.Web.Host.csproj") -c Release -r $Rid --self-contained true -o (Join-Path $out "server")
+dotnet publish (Join-Path $root "Grayjay.Web.Host/Grayjay.Web.Host.csproj") -c Release -r $Rid --self-contained true -p:JustCefSkipRuntimeDownload=true -o (Join-Path $out "server")
 if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed" }
 Copy-Item (Join-Path $root "LICENSE.md") (Join-Path $out "LICENSE.md")
 

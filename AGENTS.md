@@ -111,7 +111,7 @@ Platform notes:
 ```bash
 # on any machine with the .NET 8 SDK + Node 20 (cross-publishing works from Windows/macOS too)
 cd Grayjay.Web.App && npm ci && npm run build && cd ..
-dotnet publish Grayjay.Web.Host/Grayjay.Web.Host.csproj -c Release -r linux-x64 --self-contained true -o out/linux
+dotnet publish Grayjay.Web.Host/Grayjay.Web.Host.csproj -c Release -r linux-x64 --self-contained true -p:JustCefSkipRuntimeDownload=true -o out/linux
 # copy out/linux to the server as /opt/grayjay; install chromium (apt install chromium) for plugin sign-in
 ```
 

@@ -31,7 +31,7 @@ RUN case "$TARGETARCH" in \
       echo "Run: git lfs install && git lfs pull --include \"Grayjay.ClientServer/deps/$RID/**\"   then build again." >&2; \
       exit 1; \
     fi \
- && dotnet publish Grayjay.Web.Host/Grayjay.Web.Host.csproj -c Release -r $RID --self-contained true -o /out \
+ && dotnet publish Grayjay.Web.Host/Grayjay.Web.Host.csproj -c Release -r $RID --self-contained true -p:JustCefSkipRuntimeDownload=true -o /out \
  && test -f /out/app/index.html \
  && cp LICENSE.md /out/LICENSE.md
 
