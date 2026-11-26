@@ -178,7 +178,8 @@ export const sources = {
   remove: (id: string) => get(`/sources/SourceDelete?id=${q(id)}`),
   official: () => get<SourceConfig[]>("/sources/OfficialPlugins"),
   installOfficial: (ids: string[]) => post("/sources/InstallOfficialPlugins", ids),
-  login: (id: string) => get<boolean>(`/sources/SourceLogin?id=${q(id)}`),
+  /** Opens the sign-in browser and returns immediately; use lib/signin.signInAndWait to wait for the result. */
+  login: (id: string, startUrl?: string) => get<boolean>(`/sources/SourceLogin?id=${q(id)}${startUrl ? `&startUrl=${q(startUrl)}` : ""}`),
   logout: (id: string) => get(`/sources/SourceLogout?id=${q(id)}`),
   settings: (id: string) => get<any>(`/settings/SourceSettings?id=${q(id)}`),
   settingsSave: (id: string, obj: any) => post(`/settings/SourceSettingsSave?id=${q(id)}`, obj),

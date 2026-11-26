@@ -4,6 +4,7 @@ import { on } from "../api/socket";
 import Icon from "../components/Icon";
 import Sheet from "../components/Sheet";
 import SourceSettingsForm from "../components/SourceSettingsForm";
+import { YOUTUBE_CHANNEL_SWITCHER, isYouTube, signInAndWait } from "../lib/signin";
 import { toast, toastError } from "../components/Toasts";
 import PageHeader from "../shell/PageHeader";
 import "./Sources.css";
@@ -150,19 +151,25 @@ export default function Sources() {
 
 function SourceDetailsView(props: { id: string; onChanged: () => void; onRemoved: () => void }) {
   const [d, { refetch }] = createResource(() => props.id, (id) => sources.details(id));
-  const [signingIn, setSigningIn] = createSignal(false);
+  const [signingIn, setSigningIn] = createSignal<"signin" | "channel" | null>(null);
   const [showSettings, setShowSettings] = createSignal(false);
+  const [justSignedIn, setJustSignedIn] = createSignal(false);
 
-  const login = async () => {
-    setSigningIn(true);
+  // Waits for the sign-in browser to close, then reports what actually happened.
+  const login = async (startUrl?: string) => {
+    const wasSignedIn = !!d()?.hasLoggedIn;
+    setSigningIn(startUrl ? "channel" : "signin");
     try {
-      // Blocks until sign-in finishes in the remote login browser (opened automatically).
-      const ok = await sources.login(props.id);
-      if (ok) toast("Signed in");
+      const ok = await signInAndWait(props.id, startUrl);
+      if (ok) {
+        toast(startUrl ? "Channel switched" : "Signed in");
+        if (!startUrl && !wasSignedIn) setJustSignedIn(true);
+      } else if (!wasSignedIn) toast("Sign-in wasn't completed", "error");
       refetch(); props.onChanged();
     } catch (e) { toastError(e); }
-    finally { setSigningIn(false); }
+    finally { setSigningIn(null); }
   };
+  const chooseChannel = () => { setJustSignedIn(false); login(YOUTUBE_CHANNEL_SWITCHER); };
   const logout = async () => {
     try {
       await sources.logout(props.id);
@@ -201,12 +208,22 @@ function SourceDetailsView(props: { id: string; onChanged: () => void; onRemoved
             </div>
             <div class="row" style={{ "margin-top": "12px" }}>
               <Show when={d()!.hasLoggedIn} fallback={
-                <button class="btn accent block" onClick={login} disabled={signingIn()}>{signingIn() ? "Waiting for sign-in…" : "Sign in"}</button>
+                <button class="btn accent block" onClick={() => login()} disabled={!!signingIn()}>{signingIn() ? "Waiting for sign-in…" : "Sign in"}</button>
               }>
-                <button class="btn block" onClick={login} disabled={signingIn()}>Switch account</button>
-                <button class="btn block danger" onClick={logout}>Sign out</button>
+                <Show when={isYouTube(d()!.config.name)} fallback={
+                  <button class="btn block" onClick={() => login()} disabled={!!signingIn()}>{signingIn() ? "Waiting…" : "Switch account"}</button>
+                }>
+                  <button class="btn block" onClick={chooseChannel} disabled={!!signingIn()}>{signingIn() === "channel" ? "Waiting…" : "Choose channel"}</button>
+                </Show>
+                <button class="btn block danger" onClick={logout} disabled={!!signingIn()}>Sign out</button>
               </Show>
             </div>
+            <Show when={justSignedIn() && isYouTube(d()!.config.name)}>
+              <div class="signin-followup">
+                <span>Have more than one YouTube channel or a brand account?</span>
+                <button class="btn small accent" onClick={chooseChannel}>Choose channel</button>
+              </div>
+            </Show>
           </div>
         </Show>
 

@@ -103,8 +103,13 @@ namespace Grayjay.ClientServer.Controllers
             return true;
         }
 
+        /// <param name="startUrl">
+        /// [GrayjayWeb] Optional page to start the sign-in browser on instead of the plugin's login URL, e.g.
+        /// https://www.youtube.com/channel_switcher to choose a YouTube channel with an already remembered Google account.
+        /// Must be https on the same site as the plugin's login URL (or google.com/youtube.com for Google sign-ins).
+        /// </param>
         [HttpGet]
-        public async Task<bool> SourceLogin(string id)
+        public async Task<bool> SourceLogin(string id, string? startUrl = null)
         {
             if (GrayjayServer.Instance?.WindowProvider == null)
             {
@@ -174,7 +179,15 @@ namespace Grayjay.ClientServer.Controllers
                 }
             }
 
-            window = await GrayjayServer.Instance.WindowProvider.CreateInterceptorWindowAsync("Grayjay (Login)", authConfig.LoginUrl, authConfig.UserAgent, 
+            var loginUrl = authConfig.LoginUrl;
+            if (!string.IsNullOrEmpty(startUrl))
+            {
+                if (!IsAllowedLoginStartUrl(startUrl, authConfig.LoginUrl))
+                    throw new ArgumentException("That start page isn't allowed for this source.");
+                loginUrl = startUrl;
+            }
+
+            window = await GrayjayServer.Instance.WindowProvider.CreateInterceptorWindowAsync("Grayjay (Login)", loginUrl, authConfig.UserAgent, 
                 ((authConfig is PluginAuthDesktopConfig dconfig) ? dconfig.UseMobileEmulation : true),
                 (!string.IsNullOrEmpty(authConfig.LoginButton) ? $$"""
                     (() => {
@@ -285,6 +298,19 @@ namespace Grayjay.ClientServer.Controllers
             window.OnClosed += _closed;
 
             return true;
+        }
+
+        private static bool IsAllowedLoginStartUrl(string startUrl, string loginUrl)
+        {
+            if (!Uri.TryCreate(startUrl, UriKind.Absolute, out var start) || start.Scheme != Uri.UriSchemeHttps)
+                return false;
+            static string site(string host) { var parts = host.ToLowerInvariant().Split('.'); return parts.Length >= 2 ? string.Join('.', parts[^2..]) : host.ToLowerInvariant(); }
+            var startSite = site(start.Host);
+            if (Uri.TryCreate(loginUrl, UriKind.Absolute, out var login) && site(login.Host) == startSite)
+                return true;
+            // Google sign-ins continue on YouTube (and vice versa).
+            return (startSite == "youtube.com" || startSite == "google.com") && Uri.TryCreate(loginUrl, UriKind.Absolute, out var l2)
+                && (site(l2.Host) == "google.com" || site(l2.Host) == "youtube.com");
         }
 
         [HttpGet]

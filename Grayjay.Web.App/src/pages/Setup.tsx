@@ -6,6 +6,7 @@ import { on } from "../api/socket";
 import Icon from "../components/Icon";
 import { toast, toastError } from "../components/Toasts";
 import { iconOf } from "./Sources";
+import { YOUTUBE_CHANNEL_SWITCHER, isYouTube, signInAndWait } from "../lib/signin";
 import "./Setup.css";
 
 type Step = "welcome" | "data" | "sources" | "signin" | "done";
@@ -282,9 +283,13 @@ function SignIn() {
     return details.filter((d) => d && d.config.authentication);
   });
   const [busy, setBusy] = createSignal<string | null>(null);
-  const login = async (id: string) => {
+  const login = async (id: string, startUrl?: string) => {
     setBusy(id);
-    try { if (await sources.login(id)) toast("Signed in"); refetch(); }
+    try {
+      const ok = await signInAndWait(id, startUrl);
+      toast(ok ? (startUrl ? "Channel switched" : "Signed in") : "Sign-in wasn't completed", ok ? "info" : "error");
+      refetch();
+    }
     catch (e) { toastError(e); }
     finally { setBusy(null); }
   };
@@ -300,7 +305,11 @@ function SignIn() {
                 <div class="list-item">
                   <div class="src-icon" style={{ width: "36px", height: "36px" }}><Show when={iconOf(d!.config)}><img src={iconOf(d!.config)} alt="" referrerpolicy="no-referrer" /></Show></div>
                   <div class="grow"><div class="title">{d!.config.name}</div><div class="sub">{d!.hasLoggedIn ? "Signed in" : "Not signed in"}</div></div>
-                  <Show when={!d!.hasLoggedIn} fallback={<Icon name="check" />}>
+                  <Show when={!d!.hasLoggedIn} fallback={
+                    <Show when={isYouTube(d!.config.name)} fallback={<Icon name="check" />}>
+                      <button class="btn small" disabled={busy() === d!.config.id} onClick={() => login(d!.config.id, YOUTUBE_CHANNEL_SWITCHER)}>{busy() === d!.config.id ? "Waiting…" : "Choose channel"}</button>
+                    </Show>
+                  }>
                     <button class="btn small accent" disabled={busy() === d!.config.id} onClick={() => login(d!.config.id)}>{busy() === d!.config.id ? "Waiting…" : "Sign in"}</button>
                   </Show>
                 </div>

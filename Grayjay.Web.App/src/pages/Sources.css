@@ -24,3 +24,6 @@
 .settings-group-title { font-size: 13px; font-weight: 700; color: var(--text-2); text-transform: uppercase; letter-spacing: 0.04em; padding: 4px 4px 0; }
 .list-item .sub.wrap { white-space: normal; }
 .settings-select { flex: none; max-width: 45%; min-height: 36px; padding: 4px 10px; border-radius: var(--radius-s); border: 1px solid var(--line); background: var(--bg-elev-2); color: var(--text); }
+
+.signin-followup { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); font-size: 14px; }
+.signin-followup span { flex: 1; min-width: 160px; }
