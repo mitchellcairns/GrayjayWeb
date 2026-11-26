@@ -411,3 +411,11 @@ Grayjay_Steam.zip
 /Grayjay.Desktop.CEF/output.txt
 
 /Grayjay.ClientServer/wwwroot/web/assets/
+
+# [GrayjayWeb]
+Grayjay.Web.App/node_modules/
+Grayjay.Web.App/dist/
+Grayjay.Web.App/dev-dist/
+Grayjay.Web.Tray/target/
+out/
+.claude/
