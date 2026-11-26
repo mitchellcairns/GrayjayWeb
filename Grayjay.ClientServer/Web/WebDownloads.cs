@@ -171,23 +171,39 @@ namespace Grayjay.ClientServer.Web
             bool muxed = video != null && audios.Count == 0;
             if (!muxed && audios.Count > 0)
             {
-                // Audio in the same family as the video, so the two join without converting.
-                var prefer = video != null && IsWebm(video.Container) ? new List<string> { "audio/webm" } : new List<string> { "audio/mp4" };
-                audio = VideoHelper.SelectBestAudioSource(audios, prefer, GrayjaySettings.Instance.Playback.GetPrimaryLanguage());
+                // Audio in the same family as the video, so the two join without converting: AAC with MP4 video (plays
+                // everywhere; not e.g. IAMF/Opus-in-MP4), Opus/Vorbis with WebM.
+                bool webm = video != null && IsWebm(video.Container);
+                bool fits(IAudioSource a) => webm
+                    ? IsWebm(a.Container)
+                    : (a.Codec?.StartsWith("mp4a", StringComparison.OrdinalIgnoreCase) ?? false) || (a.Codec == null && IsMp4(a.Container));
+                var compatible = audios.Where(fits).ToList();
+                // Same kind of source as the video where possible (both direct links, or both streamed).
+                var sameKind = compatible.Where(a => (a is UMPAudioFormatSource) == (video is UMPVideoFormatSource)).ToList();
+                var pool = sameKind.Count > 0 ? sameKind : compatible.Count > 0 ? compatible : audios;
+                audio = VideoHelper.SelectBestAudioSource(pool, new List<string> { webm ? "audio/webm" : "audio/mp4" }, GrayjaySettings.Instance.Playback.GetPrimaryLanguage());
             }
             if (video == null && audio == null)
                 throw new InvalidOperationException("No downloadable audio or video found for this video.");
 
             var download = StateDownloads.StartDownload(details, video, audio, null);
             _ = StateDownloads.StartDownloadCycle();
-            Logger.i(nameof(WebDownloads), $"Downloading [{details.Name}]: {video?.Height.ToString() ?? "no"}p {video?.Codec} {video?.Container} + {audio?.Codec} {audio?.Container}");
+            Logger.i(nameof(WebDownloads), $"Downloading [{details.Name}]: {video?.Height.ToString() ?? "no"}p {video?.Codec} {video?.Container} ({video?.GetType().Name}) + {audio?.Codec} {audio?.Container} ({audio?.GetType().Name})");
             return StatusOf(download);
         }
 
         public static void Remove(string url)
         {
             var d = Downloading(url);
-            if (d != null) StateDownloads.RemoveDownloading(d);
+            if (d != null)
+            {
+                StateDownloads.RemoveDownloading(d);
+                // Partial files kept for resuming.
+                foreach (var f in new[] { d.VideoFilePath, d.AudioFilePath }.Where(f => !string.IsNullOrEmpty(f)))
+                {
+                    try { if (File.Exists(VideoDownload.PartialMarker(f!))) { File.Delete(VideoDownload.PartialMarker(f!)); File.Delete(f!); } } catch { }
+                }
+            }
             var local = StateDownloads.GetDownloadedVideo(url);
             if (local != null)
             {
@@ -289,14 +305,45 @@ namespace Grayjay.ClientServer.Web
             app.MapPost("/web/downloads/Remove", (string url) => { Remove(url); return Results.Ok(true); });
 
             // The file the phone keeps. Range requests are supported (resuming, and playing it straight from the server).
-            app.MapGet("/web/downloads/File", async (string url) =>
+            // With wait=1 the request is held until the server's download finishes: the phone's background download can be
+            // started right away and completes with the app closed. Last-Modified/ETag let a browser resume it with If-Range.
+            app.MapGet("/web/downloads/File", async (string url, int? wait, CancellationToken ct) =>
             {
                 var local = StateDownloads.GetDownloadedVideo(url);
+                if (local == null && wait == 1)
+                {
+                    var until = DateTime.UtcNow.AddHours(3);
+                    int retries = 0;
+                    while (local == null && DateTime.UtcNow < until && !ct.IsCancellationRequested)
+                    {
+                        var d = Downloading(url);
+                        if (d == null) break;
+                        if (d.State == DownloadState.ERROR)
+                        {
+                            // Nobody may be watching (the app is closed): retry here. It carries on from the partial file.
+                            if (retries >= 3)
+                                return Results.Problem(d.Error ?? "The server couldn't download it", statusCode: 502);
+                            retries++;
+                            Logger.w(nameof(WebDownloads), $"Download of [{d.Video?.Name}] failed ({d.Error}); retry {retries}/3");
+                            try { await Task.Delay(3000 * retries, ct); } catch (OperationCanceledException) { break; }
+                            if (Downloading(url)?.State == DownloadState.ERROR)
+                            {
+                                try { Start(url, d.VideoSource?.Height ?? (int)Math.Sqrt((d.TargetPixelCount ?? 1280 * 720) * 9 / 16.0)); }
+                                catch (Exception e) { return Results.Problem(e.Message, statusCode: 502); }
+                            }
+                            continue;
+                        }
+                        try { await Task.Delay(2000, ct); } catch (OperationCanceledException) { break; }
+                        local = StateDownloads.GetDownloadedVideo(url);
+                    }
+                }
                 if (local == null) return Results.NotFound(new { error = "Not downloaded on the server (yet)" });
                 try
                 {
                     var (path, mime) = await OfflineFile(local);
-                    return Results.File(path, mime, enableRangeProcessing: true);
+                    var info = new FileInfo(path);
+                    var etag = new Microsoft.Net.Http.Headers.EntityTagHeaderValue($"\"{info.Length:x}-{info.LastWriteTimeUtc.Ticks:x}\"");
+                    return Results.File(path, mime, lastModified: info.LastWriteTimeUtc, entityTag: etag, enableRangeProcessing: true);
                 }
                 catch (Exception e) { return Results.Problem(e.Message, statusCode: 500); }
             });

@@ -51,6 +51,8 @@ export default defineConfig({
         navigateFallbackAllowlist: [/^\/app(\/|$)/],
         maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
         cleanupOutdatedCaches: true,
+        // Downloads that carry on with the app closed (Background Fetch); see public/bg-fetch-sw.js.
+        importScripts: ["bg-fetch-sw.js"],
         runtimeCaching: [
           {
             // Thumbnails and avatars from content platforms.

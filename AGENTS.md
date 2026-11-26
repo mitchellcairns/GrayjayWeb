@@ -170,6 +170,11 @@ location / {
    Library → Downloads and play with no connection. Opening the app with the server unreachable offers
    *Watch your downloads*; that needs the installed app over **HTTPS** (the service worker caches the app itself).
    Videos another device downloaded show under *On your server* with *Save here*.
+   Downloads don't need the app open: on Chrome/Edge/Brave/Samsung Internet (installed app over HTTPS) the copy to the
+   phone is a Background Fetch (`public/bg-fetch-sw.js`), started right away against `/web/downloads/File?wait=1`, which
+   the server holds until its download is done. Elsewhere (iPhone, Firefox, plain HTTP) the copy runs while the app is open
+   and continues from the last saved 8 MB piece when it's reopened. Server downloads continue from partial files
+   (`<file>.partial` markers in the downloads folder) after a dropped connection or a restart.
 
 ## Troubleshooting
 

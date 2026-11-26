@@ -61,12 +61,13 @@ let dbPromise: Promise<IDBDatabase> | null = null;
 function db(): Promise<IDBDatabase> {
   dbPromise ??= new Promise((resolve, reject) => {
     if (!("indexedDB" in window)) { reject(new Error("This browser can't store downloads")); return; }
-    const req = indexedDB.open(DB_NAME, 1);
+    // v2: "parts" (pieces of a copy in progress, so it resumes after the app closes) and "meta" (downloads in progress).
+    // public/bg-fetch-sw.js opens the same database: keep the two in step.
+    const req = indexedDB.open(DB_NAME, 2);
     req.onupgradeneeded = () => {
       const d = req.result;
-      d.createObjectStore("items", { keyPath: "url" });
-      d.createObjectStore("files");
-      d.createObjectStore("thumbs");
+      for (const name of ["items", "files", "thumbs", "parts", "meta"])
+        if (!d.objectStoreNames.contains(name)) d.createObjectStore(name, name === "items" ? { keyPath: "url" } : undefined);
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => { dbPromise = null; reject(req.error ?? new Error("Couldn't open this device's download storage")); };
@@ -92,6 +93,52 @@ const readPending = (): Pending[] => { try { return JSON.parse(localStorage.getI
 const writePending = (p: Pending[]) => { try { localStorage.setItem(PENDING_KEY, JSON.stringify(p)); } catch { } };
 
 const CHUNK_FLUSH = 8 * 1024 * 1024;
+const BG_PREFIX = "gj-dl:";
+
+/** A download in progress, kept in IndexedDB (the service worker reads it when a background download finishes). */
+interface Meta { url: string; aliases: string[]; name: string; height: number; etag?: string; background?: boolean }
+
+async function getMeta(url: string): Promise<Meta | undefined> {
+  const d = await db();
+  return request<Meta | undefined>(d.transaction("meta").objectStore("meta").get(url));
+}
+async function putMeta(m: Meta) {
+  const d = await db();
+  const tx = d.transaction("meta", "readwrite");
+  tx.objectStore("meta").put(m, m.url);
+  await done(tx);
+}
+async function allMeta(): Promise<Meta[]> {
+  const d = await db();
+  return request<Meta[]>(d.transaction("meta").objectStore("meta").getAll());
+}
+const partRange = (url: string) => IDBKeyRange.bound(`${url}#`, `${url}#\uffff`);
+async function loadParts(url: string): Promise<Blob[]> {
+  const d = await db();
+  return request<Blob[]>(d.transaction("parts").objectStore("parts").getAll(partRange(url)));
+}
+async function putPart(url: string, index: number, blob: Blob) {
+  const d = await db();
+  const tx = d.transaction("parts", "readwrite");
+  tx.objectStore("parts").put(blob, `${url}#${String(index).padStart(6, "0")}`);
+  await done(tx);
+}
+async function clearDownloadState(url: string) {
+  const d = await db();
+  const tx = d.transaction(["parts", "meta"], "readwrite");
+  tx.objectStore("parts").delete(partRange(url));
+  tx.objectStore("meta").delete(url);
+  await done(tx);
+}
+
+/** Background Fetch (Chrome, Edge, Brave, Samsung Internet): the browser downloads with the app closed. Needs the service worker. */
+async function backgroundFetcher(): Promise<any | null> {
+  if (!("BackgroundFetchManager" in window) || !navigator.serviceWorker?.controller) return null;
+  try {
+    const reg: any = await navigator.serviceWorker.getRegistration("/app/");
+    return reg?.backgroundFetch ? reg.backgroundFetch : null;
+  } catch { return null; }
+}
 
 function createOffline() {
   const [items, setItems] = createSignal<OfflineItem[]>([]);
@@ -126,23 +173,32 @@ function createOffline() {
     wake.set(url, () => { clearTimeout(t); wake.delete(url); resolve(); });
   });
 
-  async function fetchFile(url: string, onProgress: (received: number, total: number) => void): Promise<{ blob: Blob; mime: string }> {
-    const parts: Blob[] = [];
-    let chunks: Uint8Array[] = [], pending = 0, received = 0, total = 0, mime = "video/mp4";
-    // A dropped connection (the phone locking, Wi-Fi switching) carries on from where it stopped.
+  /**
+   * Copies the server's file here in 8 MB pieces stored as they arrive, so a dropped connection, a locked phone or a
+   * closed app carries on from the last piece instead of starting over.
+   */
+  async function fetchFile(url: string, meta: Meta, onProgress: (received: number, total: number) => void): Promise<{ blob: Blob; mime: string }> {
+    const parts: Blob[] = await loadParts(url).catch(() => []);
+    let chunks: Uint8Array[] = [], pending = 0, total = 0, mime = "video/mp4";
+    let received = parts.reduce((n, b) => n + b.size, 0);
+    let etag = meta.etag;
+    const restart = async () => { await clearDownloadState(url).catch(() => { }); await putMeta(meta).catch(() => { }); parts.length = 0; chunks = []; pending = 0; received = 0; };
     for (let attempt = 0; ; attempt++) {
       try {
         const res = await fetch(`/web/downloads/File?url=${q(url)}`, {
           credentials: "same-origin",
-          headers: received > 0 ? { Range: `bytes=${received}-` } : {},
+          // If-Range: if the file changed on the server since, it sends the whole file and this starts over.
+          headers: received > 0 ? { Range: `bytes=${received}-`, ...(etag ? { "If-Range": etag } : {}) } : {},
         });
         if (!res.ok) {
           let msg = `Couldn't copy the file (${res.status})`;
           try { const j = await res.json(); msg = j.detail || j.error || j.title || msg; } catch { }
           throw Object.assign(new Error(msg), { fatal: res.status < 500 });
         }
-        if (received > 0 && res.status !== 206) { parts.length = 0; chunks = []; pending = 0; received = 0; } // no resume: start over
+        if (received > 0 && res.status !== 206) await restart(); // can't resume: start over
         mime = res.headers.get("content-type")?.split(";")[0] || mime;
+        const newTag = res.headers.get("etag") ?? undefined;
+        if (newTag !== etag) { etag = newTag; meta = { ...meta, etag }; await putMeta(meta).catch(() => { }); }
         const range = res.headers.get("content-range")?.match(/\/(\d+)$/);
         total = range ? +range[1] : (+(res.headers.get("content-length") ?? 0) || total);
         const reader = res.body!.getReader();
@@ -151,16 +207,87 @@ function createOffline() {
           if (end) break;
           chunks.push(value); pending += value.byteLength; received += value.byteLength;
           // Hand big pieces to the browser's blob storage (spills to disk) instead of keeping them in memory.
-          if (pending >= CHUNK_FLUSH) { parts.push(new Blob(chunks as BlobPart[])); chunks = []; pending = 0; }
+          if (pending >= CHUNK_FLUSH) {
+            const piece = new Blob(chunks as BlobPart[]);
+            chunks = []; pending = 0;
+            await putPart(url, parts.length, piece);
+            parts.push(piece);
+          }
           onProgress(received, total);
         }
         if (total && received < total) throw new Error("The connection dropped");
-        if (chunks.length) parts.push(new Blob(chunks as BlobPart[]));
+        if (chunks.length) { const piece = new Blob(chunks as BlobPart[]); chunks = []; pending = 0; await putPart(url, parts.length, piece); parts.push(piece); }
         return { blob: new Blob(parts, { type: mime }), mime };
       } catch (e: any) {
-        if (e?.fatal || attempt >= 4) throw e;
-        await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
+        // What didn't make it into a stored piece is fetched again.
+        received -= pending; chunks = []; pending = 0;
+        if (e?.fatal || attempt >= 6) throw e;
+        await new Promise((r) => setTimeout(r, 1500 * Math.min(attempt + 1, 4)));
       }
+    }
+  }
+
+  async function save(url: string, aliases: string[], s: ServerDownload, fallbackName: string, blob: Blob, mime: string) {
+    let thumb: Blob | null = null;
+    try {
+      const r = await fetch(`/web/downloads/Thumbnail?url=${q(url)}`, { credentials: "same-origin" });
+      if (r.ok) thumb = await r.blob();
+    } catch { }
+    const item: OfflineItem = {
+      url, aliases,
+      name: s.name || fallbackName, duration: s.duration, dateTime: s.dateTime, height: s.height, audioOnly: s.audioOnly,
+      author: { name: s.author, url: s.authorUrl, thumbnail: s.authorThumbnail },
+      mime, size: blob.size, savedAt: Date.now(), hasThumb: !!thumb,
+    };
+    const d = await db();
+    const tx = d.transaction(["items", "files", "thumbs"], "readwrite");
+    tx.objectStore("files").put(blob, url);
+    if (thumb) tx.objectStore("thumbs").put(thumb, url);
+    tx.objectStore("items").put(item);
+    await done(tx);
+    await clearDownloadState(url).catch(() => { });
+    await refresh();
+    return item;
+  }
+
+  // Background downloads finishing (the service worker stored the file) or failing.
+  const bgWaiters = new Map<string, (r: { ok: boolean; error?: string }) => void>();
+  navigator.serviceWorker?.addEventListener("message", (e: MessageEvent) => {
+    const m = e.data;
+    if (m?.type !== "gj-offline") return;
+    refresh();
+    if (m.event === "saved") dropJob(m.url);
+    bgWaiters.get(m.url)?.({ ok: m.event === "saved", error: m.error });
+  });
+
+  /** Follows a background download while the app is open: server progress, then the browser's. */
+  async function followBackground(url: string, bg: any, size?: number) {
+    const reg = await bg.get(BG_PREFIX + url);
+    if (!reg) return { ok: !!byUrl(url), error: "The background download stopped" };
+    const onProgress = () => {
+      if (reg.downloaded > 0) setJob(url, { phase: "device", progress: size ? Math.min(1, reg.downloaded / size) : 0, detail: "Saving to this device (continues if you close the app)" });
+      if (reg.result === "failure") bgWaiters.get(url)?.({ ok: false, error: reg.failureReason || "failed" });
+    };
+    reg.addEventListener("progress", onProgress);
+    try {
+      return await new Promise<{ ok: boolean; error?: string }>((resolve) => {
+        bgWaiters.set(url, resolve);
+        // Server progress while the browser waits for the file (the app may have been reopened mid-way).
+        (async () => {
+          while (bgWaiters.get(url) === resolve && reg.downloaded === 0 && reg.result === "") {
+            try {
+              const s = await downloadsApi.status(url);
+              size = s.size || size;
+              if (s.state !== "ready") setJob(url, { phase: "server", progress: s.progress, detail: s.state === "error" ? "Interrupted on your server; retrying" : "Downloading on your server (continues if you close the app)" });
+            } catch { }
+            await sleep(url, 2000);
+            if (byUrl(url)) resolve({ ok: true });
+          }
+        })();
+      });
+    } finally {
+      bgWaiters.delete(url);
+      reg.removeEventListener("progress", onProgress);
     }
   }
 
@@ -178,6 +305,30 @@ function createOffline() {
         writePending(readPending().map((x) => (x.url === from ? { ...x, url } : x)));
       }
       if (s.name) setJob(url, { name: s.name });
+      const meta: Meta = { url, aliases: url === p.url ? [] : [p.url], name: s.name || p.name, height: p.height };
+
+      // The browser's own downloader: carries on with the app closed, then the service worker stores the file.
+      const bg = await backgroundFetcher();
+      if (bg) {
+        try {
+          if (!(await bg.get(BG_PREFIX + url))) {
+            await putMeta({ ...meta, background: true });
+            await bg.fetch(BG_PREFIX + url, [`/web/downloads/File?url=${q(url)}&wait=1`], {
+              title: meta.name, downloadTotal: 0,
+              icons: [{ src: "/app/pwa-192x192.png", sizes: "192x192", type: "image/png" }],
+            });
+          }
+          writePending(readPending().filter((x) => x.url !== p.url && x.url !== url)); // the browser owns it now
+          setJob(url, { detail: "Downloading on your server (continues if you close the app)" });
+          const r = await followBackground(url, bg, s.size);
+          if (r.ok) { dropJob(url); return byUrl(url); }
+          // Didn't work in the background: carry on here while the app is open.
+          await putMeta(meta).catch(() => { });
+          writePending([...readPending().filter((x) => x.url !== url), { ...p, url }]);
+          s = await downloadsApi.status(url).catch(() => s);
+        } catch { /* no background downloads after all (e.g. permission): carry on here */ }
+      }
+
       let retries = 0;
       while (s.state !== "ready") {
         if (s.state === "error") {
@@ -204,26 +355,10 @@ function createOffline() {
       navigator.storage?.persist?.().catch(() => { });
 
       setJob(url, { phase: "device", progress: 0, detail: "Saving to this device" });
-      const { blob, mime } = await fetchFile(url, (rec, tot) => setJob(url, { progress: tot ? rec / tot : 0 }));
-      let thumb: Blob | null = null;
-      try {
-        const r = await fetch(`/web/downloads/Thumbnail?url=${q(url)}`, { credentials: "same-origin" });
-        if (r.ok) thumb = await r.blob();
-      } catch { }
-
-      const item: OfflineItem = {
-        url, aliases: url === p.url ? [] : [p.url],
-        name: s.name || p.name, duration: s.duration, dateTime: s.dateTime, height: s.height, audioOnly: s.audioOnly,
-        author: { name: s.author, url: s.authorUrl, thumbnail: s.authorThumbnail },
-        mime, size: blob.size, savedAt: Date.now(), hasThumb: !!thumb,
-      };
-      const d = await db();
-      const tx = d.transaction(["items", "files", "thumbs"], "readwrite");
-      tx.objectStore("files").put(blob, url);
-      if (thumb) tx.objectStore("thumbs").put(thumb, url);
-      tx.objectStore("items").put(item);
-      await done(tx);
-      await refresh();
+      const stored = (await getMeta(url).catch(() => undefined)) ?? meta;
+      if (!stored.etag) await putMeta(meta).catch(() => { });
+      const { blob, mime } = await fetchFile(url, { ...meta, etag: stored.etag }, (rec, tot) => setJob(url, { progress: tot ? rec / tot : 0 }));
+      const item = await save(url, meta.aliases, s, p.name, blob, mime);
       writePending(readPending().filter((x) => x.url !== p.url && x.url !== url));
       dropJob(url);
       return item;
@@ -253,6 +388,22 @@ function createOffline() {
     async resume() {
       await refresh();
       for (const p of readPending()) if (!byUrl(p.url)) run(p).catch(() => { });
+      // Background downloads started earlier: show them while they finish (or say if one stopped).
+      try {
+        const bg = await backgroundFetcher();
+        const active = new Set<string>((bg ? await bg.getIds() : []).filter((id: string) => id.startsWith(BG_PREFIX)).map((id: string) => id.slice(BG_PREFIX.length)));
+        for (const m of await allMeta()) {
+          if (!m.background || byUrl(m.url) || running.has(m.url)) continue;
+          if (active.has(m.url)) {
+            setJobs((js) => [...js.filter((j) => j.url !== m.url), { url: m.url, name: m.name, phase: "server", progress: 0, detail: "Continuing in the background" }]);
+            running.add(m.url);
+            followBackground(m.url, bg).then((r) => { if (r.ok) dropJob(m.url); else setJob(m.url, { error: `The background download stopped (${r.error}). Retry to continue.` }); })
+              .finally(() => running.delete(m.url));
+          } else {
+            setJobs((js) => [...js.filter((j) => j.url !== m.url), { url: m.url, name: m.name, phase: "device", progress: 0, error: "The download stopped. Retry to continue." }]);
+          }
+        }
+      } catch { }
     },
 
     /** Download a video to this device (the server downloads it first). Resolves once it's stored here. */
@@ -267,7 +418,13 @@ function createOffline() {
       return this.download({ url: s.url, name: s.name ?? "" }, s.height || 720);
     },
 
-    dismiss(url: string) { dropJob(url); },
+    dismiss(url: string) { dropJob(url); clearDownloadState(url).catch(() => { }); },
+
+    /** Try a stopped download again: carries on from what was already saved. */
+    retry(url: string, name: string) {
+      dropJob(url);
+      return getMeta(url).catch(() => undefined).then((m) => this.download({ url, name: m?.name ?? name }, m?.height ?? 720));
+    },
 
     async remove(url: string, alsoServer = true) {
       const it = byUrl(url);
@@ -278,6 +435,8 @@ function createOffline() {
       tx.objectStore("files").delete(key);
       tx.objectStore("thumbs").delete(key);
       await done(tx);
+      await clearDownloadState(key).catch(() => { });
+      try { await (await (await backgroundFetcher())?.get(BG_PREFIX + key))?.abort(); } catch { }
       dropJob(key);
       await refresh();
       if (alsoServer) await downloadsApi.remove(key).catch(() => { });

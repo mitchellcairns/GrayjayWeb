@@ -325,7 +325,8 @@ namespace Grayjay.ClientServer.Models.Downloads
                         throw new DownloadException("No downloadable video source with audio found", true);
                 }
 
-                var vsource = VideoHelper.SelectBestVideoSource(videoSources, (int)TargetPixelCount, new List<string>(), TargetLanguage, TargetLanguage != null);
+                // [GrayjayWeb] Prefer MP4 (plays on every device, iPhones included) when a download is prepared again.
+                var vsource = VideoHelper.SelectBestVideoSource(videoSources, (int)TargetPixelCount, new List<string> { "video/mp4" }, TargetLanguage, TargetLanguage != null);
                 if (vsource != null)
                 {
                     if (vsource is VideoUrlSource || vsource is DashManifestRawSource || vsource is UMPVideoFormatSource)
@@ -358,7 +359,7 @@ namespace Grayjay.ClientServer.Models.Downloads
                     }
                 }
 
-                var asource = VideoHelper.SelectBestAudioSource(audioSources, new List<string>(), TargetLanguage, TargetBitrate, TargetLanguage != null);
+                var asource = VideoHelper.SelectBestAudioSource(audioSources, new List<string> { "audio/mp4" }, TargetLanguage, TargetBitrate, TargetLanguage != null); // [GrayjayWeb] MP4 first
                 if (asource == null && VideoSource == null)
                     throw new DownloadException("Could not find a valid video or audio source for download", false);
 
@@ -736,7 +737,8 @@ namespace Grayjay.ClientServer.Models.Downloads
                 {
                     try
                     {
-                        if (VideoFilePath != null)
+                        // [GrayjayWeb] Partial files with a resume marker are kept for the next attempt.
+                        if (VideoFilePath != null && !File.Exists(PartialMarker(VideoFilePath)))
                         {
                             if (File.Exists(VideoFilePath) && new FileInfo(VideoFilePath).Length > 0)
                             {
@@ -744,7 +746,7 @@ namespace Grayjay.ClientServer.Models.Downloads
                                 File.Delete(VideoFilePath);
                             }
                         }
-                        if (AudioFilePath != null)
+                        if (AudioFilePath != null && !File.Exists(PartialMarker(AudioFilePath)))
                         {
                             if (File.Exists(AudioFilePath) && new FileInfo(AudioFilePath).Length > 0)
                             {
@@ -763,25 +765,65 @@ namespace Grayjay.ClientServer.Models.Downloads
         }
         #region Download Deps
 
+        /// <summary>
+        /// [GrayjayWeb] Marker next to a partly downloaded file holding the source's full length. While it exists, a failed or
+        /// interrupted download keeps the partial file, and the next attempt continues from where it stopped (if the source
+        /// is the same length) instead of starting again.
+        /// </summary>
+        public static string PartialMarker(string filePath) => filePath + ".partial";
+
         private async Task DownloadSourceFile(string name, ManagedHttpClient client, IRequestModifier? modifier, string url, string targetFile, Action<long, long, long> onProgress, bool allowByteRangeDownload = true, CancellationToken cancel = default)
         {
-            if (File.Exists(targetFile))
-                File.Delete(targetFile);
-
             long sourceLength = 0;
+            // [GrayjayWeb] Resumable: ranged downloads continue a partial file left by an earlier attempt.
+            var marker = PartialMarker(targetFile);
+            //GrayjaySettings.Instance.Downloads.ByteRangeDownload
+            var (ranged, probedLength) = allowByteRangeDownload ? ProbeSource(client, modifier, url, cancel) : (false, 0L);
+            long resumeFrom = 0;
+            if (ranged)
+            {
+                sourceLength = probedLength;
+                // Finished in an earlier attempt (its marker goes once it's complete): nothing to do.
+                if (File.Exists(targetFile) && !File.Exists(marker) && new FileInfo(targetFile).Length == sourceLength)
+                {
+                    Logger.i(nameof(VideoDownload), $"Download {Video.Name} {name} already complete");
+                    onProgress?.Invoke(sourceLength, sourceLength, 0);
+                    return;
+                }
+                try
+                {
+                    if (File.Exists(targetFile) && File.Exists(marker) && File.ReadAllText(marker).Trim() == sourceLength.ToString())
+                    {
+                        var have = new FileInfo(targetFile).Length;
+                        if (have > 0 && have < sourceLength) resumeFrom = have;
+                    }
+                }
+                catch { resumeFrom = 0; }
+            }
+            if (resumeFrom == 0)
+            {
+                if (File.Exists(targetFile))
+                    File.Delete(targetFile);
+                if (File.Exists(marker))
+                    File.Delete(marker);
+            }
+
             try
             {
-                using (FileStream stream = new FileStream(targetFile, FileMode.Create, FileAccess.Write, FileShare.ReadWrite))
+                using (FileStream stream = new FileStream(targetFile, resumeFrom > 0 ? FileMode.Open : FileMode.Create, FileAccess.Write, FileShare.ReadWrite))
                 {
-                    var head = client.TryHead(url);
-                    //GrayjaySettings.Instance.Downloads.ByteRangeDownload
-                    if (allowByteRangeDownload && true && head?.Headers?.Contains("accept-ranges") == true && head?.Headers?.Contains("content-length") == true)
+                    if (ranged)
                     {
                         var concurrency = Math.Min(2, GrayjaySettings.Instance.Downloads.GetByteRangeThreadCount()); //TODO: Temporary limit to 2 to prevent ratelimits
+                        File.WriteAllText(marker, sourceLength.ToString());
+                        if (resumeFrom > 0)
+                        {
+                            stream.Seek(resumeFrom, SeekOrigin.Begin);
+                            Logger.i(nameof(VideoDownload), $"Download {Video.Name} resuming {name} at {resumeFrom}/{sourceLength} bytes");
+                        }
                         Logger.i(nameof(VideoDownload), $"Download {Video.Name} ByteRange Parallel ({concurrency})");
-                        sourceLength = long.Parse(head.Headers["content-length"]);
-                        onProgress?.Invoke(sourceLength, 0, 0);
-                        await DownloadSourceRanges(client, modifier, stream, url, sourceLength, 1024 * 512, concurrency, onProgress, cancel);
+                        onProgress?.Invoke(sourceLength, resumeFrom, 0);
+                        await DownloadSourceRanges(client, modifier, stream, url, sourceLength, 1024 * 512, concurrency, onProgress, cancel, resumeFrom);
                     }
                     else
                     {
@@ -789,14 +831,57 @@ namespace Grayjay.ClientServer.Models.Downloads
                         sourceLength = DownloadSourceSequential(client, modifier, stream, url, onProgress, cancel);
                     }
                 }
+                if (File.Exists(marker))
+                    File.Delete(marker);
             }
             catch (Exception ex)
             {
-                if (File.Exists(targetFile))
+                // [GrayjayWeb] Keep what was downloaded (with its marker) so the next attempt continues from there.
+                if (!(ranged && File.Exists(marker)) && File.Exists(targetFile))
                     File.Delete(targetFile);
                 throw;
             }
 
+        }
+
+        /// <summary>
+        /// [GrayjayWeb] Whether the source can be fetched in ranges, and its length. Upstream sent a bare HEAD (without the
+        /// source's request modifier), which YouTube sometimes answers by dropping the connection ("An error occurred while
+        /// sending the request"): the whole download then failed before writing anything and started over. Ask for the
+        /// first byte with a normal GET instead (retried), and fall back to HEAD.
+        /// </summary>
+        private (bool Ranged, long Length) ProbeSource(ManagedHttpClient client, IRequestModifier? modifier, string url, CancellationToken cancel)
+        {
+            for (int attempt = 0; attempt < 3; attempt++)
+            {
+                cancel.ThrowIfCancellationRequested();
+                try
+                {
+                    var res = ModifierHttp.GetStream(client, url, modifier, new Engine.Models.HttpHeaders() { { "range", "bytes=0-0" } }, cancel, ReadIdleTimeout);
+                    using (res.Stream)
+                    {
+                        if (res.Code == 206 && System.Net.Http.Headers.ContentRangeHeaderValue.TryParse(res.Headers?["Content-Range"], out var range) && range.HasLength && range.Length > 0)
+                            return (true, range.Length!.Value);
+                        if (res.IsOk)
+                            return (false, 0);
+                    }
+                    Logger.w(nameof(VideoDownload), $"Probing {Video?.Name} source returned [{res.Code}], retry {attempt + 1}/3");
+                }
+                catch (Exception ex) when (!cancel.IsCancellationRequested && (ex is HttpRequestException || ex is IOException || ex is TaskCanceledException || ex is AggregateException))
+                {
+                    Logger.w(nameof(VideoDownload), $"Probing {Video?.Name} source failed ({ex.Message}), retry {attempt + 1}/3");
+                }
+                if (cancel.WaitHandle.WaitOne(TimeSpan.FromMilliseconds(1000 * (attempt + 1))))
+                    cancel.ThrowIfCancellationRequested();
+            }
+            try
+            {
+                var head = client.TryHead(url);
+                if (head?.Headers?.Contains("accept-ranges") == true && head?.Headers?.Contains("content-length") == true)
+                    return (true, long.Parse(head.Headers["content-length"]));
+            }
+            catch (Exception ex) { Logger.w(nameof(VideoDownload), $"HEAD for {Video?.Name} failed ({ex.Message}); downloading sequentially"); }
+            return (false, 0);
         }
 
         private long DownloadSourceSequential(ManagedHttpClient client, IRequestModifier? modifier, Stream fileStream, string url, Action<long, long, long> onProgress, CancellationToken cancel = default)
@@ -893,7 +978,7 @@ namespace Grayjay.ClientServer.Models.Downloads
             }
         }
 
-        private async Task DownloadSourceRanges(ManagedHttpClient client, IRequestModifier? modifier, Stream fileStream, string url, long sourceLength, int rangeSize, int concurrency, Action<long, long, long> onProgress, CancellationToken cancel = default)
+        private async Task DownloadSourceRanges(ManagedHttpClient client, IRequestModifier? modifier, Stream fileStream, string url, long sourceLength, int rangeSize, int concurrency, Action<long, long, long> onProgress, CancellationToken cancel = default, long startAt = 0)
         {
             DateTime lastProgressNotify = DateTime.Now;
             int progressNotifyInterval = 500;
@@ -906,7 +991,7 @@ namespace Grayjay.ClientServer.Models.Downloads
             long lastSpeed = 0;
 
             int reqCount = -1;
-            long totalRead = 0;
+            long totalRead = startAt; // [GrayjayWeb] resuming a partial file
 
             //TODO: Full thread pool
             while (totalRead < sourceLength)
@@ -997,6 +1082,16 @@ namespace Grayjay.ClientServer.Models.Downloads
                 {
                     Logger.w(nameof(VideoDownload), $"Range request read failed ({ex.Message}) retrying");
                     WaitBeforeRetry(i);
+                    continue;
+                }
+                // [GrayjayWeb] A dropped or refused connection ("An error occurred while sending the request") or a timeout
+                // used to fail the whole download, which then started again from zero. Retry just this piece.
+                catch (Exception ex) when (i < 5 && !cancel.IsCancellationRequested &&
+                    (ex is HttpRequestException || ex is TaskCanceledException ||
+                     (ex is AggregateException agg && agg.Flatten().InnerExceptions.All(e => e is HttpRequestException || e is IOException || e is TaskCanceledException))))
+                {
+                    Logger.w(nameof(VideoDownload), $"Range request failed ({ex.Message}), retry {i + 1}/5");
+                    WaitBeforeRetry(i + 1);
                     continue;
                 }
 

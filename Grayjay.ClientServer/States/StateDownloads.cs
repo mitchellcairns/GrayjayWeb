@@ -468,6 +468,13 @@ namespace Grayjay.ClientServer.States
                 .Concat(x.AudioSources.Select(z => Path.GetFileName(z.FilePath)))
                 .Concat(x.SubtitleSources.Select(z => Path.GetFileName(z.FilePath)))
             ));
+            // [GrayjayWeb] Keep the files of downloads still in progress (partial files, their resume markers, and tracks that
+            // already finished), so a restart continues them. Their names start with the video's ID.
+            var inProgress = _downloading.GetObjects()
+                .Select(d => d.VideoDetails?.ID?.Value ?? d.Video?.ID?.Value)
+                .Where(id => !string.IsNullOrEmpty(id))
+                .Select(id => $"{id} [".SanitizeFileName())
+                .ToList();
             List<FileInfo> toDelete = new List<FileInfo>();
             foreach (var cache in dir.GetDirectories("*.dash"))
             {
@@ -480,7 +487,7 @@ namespace Grayjay.ClientServer.States
             }
             foreach(var file in dir.GetFiles())
             {
-                if (!knownFiles.Contains(file.Name))
+                if (!knownFiles.Contains(file.Name) && !inProgress.Any(prefix => file.Name.StartsWith(prefix, StringComparison.Ordinal)))
                     toDelete.Add(file);
             }
             Logger.w("StateDownloads", $"Found {toDelete.Count} redundant downloaded files, deleting");

@@ -35,10 +35,7 @@ export default function Downloads() {
       .then((it) => { toast(`Saved "${it?.name ?? s.name}" on this device`, "info", 2500); refetch(); })
       .catch((e) => toastError(new Error(`Couldn't save it here: ${e?.message ?? e}`)));
   };
-  const retry = (url: string, name: string) => {
-    offline.dismiss(url);
-    offline.download({ url, name }, 720).catch(toastError);
-  };
+  const retry = (url: string, name: string) => { offline.retry(url, name).catch(toastError); };
 
   return (
     <section class="downloads">
