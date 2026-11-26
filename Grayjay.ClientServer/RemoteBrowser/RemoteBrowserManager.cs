@@ -51,6 +51,65 @@ namespace Grayjay.ClientServer.RemoteBrowser
             return await CreateSessionAsync(title, url, userAgent, useMobileEmulation, injectJs, handler, cancellationToken);
         }
 
+        /// <summary>
+        /// [GrayjayWeb] Per-request options, set by the web auth middleware for the device that triggered a sign-in.
+        /// Flows through async calls into <see cref="CreateSessionAsync"/> (AsyncLocal).
+        /// </summary>
+        public class RequestOptions
+        {
+            /// <summary>The request came from the computer running the server: open a real, visible browser window.</summary>
+            public bool Headful { get; init; }
+        }
+        public static readonly AsyncLocal<RequestOptions?> Ambient = new AsyncLocal<RequestOptions?>();
+
+        /// <summary>
+        /// [GrayjayWeb] Sign-in profiles are kept per sign-in host (e.g. accounts.google.com) so Google remembers the
+        /// account: signing in again or switching YouTube channel is then a single tap instead of a full sign-in.
+        /// </summary>
+        public static string GetPersistentProfileDir(string url)
+        {
+            string host;
+            try { host = new Uri(url).Host.ToLowerInvariant(); } catch { host = "default"; }
+            host = new string(host.Select(c => char.IsLetterOrDigit(c) || c == '.' || c == '-' ? c : '_').ToArray());
+            return Path.Combine(Grayjay.ClientServer.Constants.Directories.Base, "browser-profiles", host);
+        }
+
+        /// <summary>
+        /// [GrayjayWeb] Chrome allows one process per profile: a second launch hands off to the running one and exits.
+        /// Wait for any previous session's browser on this profile to exit (e.g. one just cancelled), or give up.
+        /// </summary>
+        private static async Task<bool> WaitForProfileFreeAsync(string profileDir, TimeSpan timeout, CancellationToken cancellationToken)
+        {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            while (true)
+            {
+                bool busy = _processes.Values.Any(x => string.Equals(x.ProfileDir, profileDir, StringComparison.OrdinalIgnoreCase) && !x.HasExited)
+                    || _sessions.Values.Any(x => !x.IsClosed && string.Equals(x.ProfileDir, profileDir, StringComparison.OrdinalIgnoreCase));
+                if (!busy)
+                    return true;
+                if (sw.Elapsed > timeout)
+                    return false;
+                await Task.Delay(250, cancellationToken);
+            }
+        }
+
+        /// <summary>[GrayjayWeb] Deletes remembered sign-in profiles (used when signing out of a source).</summary>
+        public static int ForgetPersistentProfiles()
+        {
+            var baseDir = Path.Combine(Grayjay.ClientServer.Constants.Directories.Base, "browser-profiles");
+            if (!Directory.Exists(baseDir))
+                return 0;
+            var inUse = new HashSet<string>(_sessions.Values.Where(x => !x.IsClosed).Select(x => x.ProfileDir ?? ""), StringComparer.OrdinalIgnoreCase);
+            int removed = 0;
+            foreach (var dir in Directory.GetDirectories(baseDir))
+            {
+                if (inUse.Contains(dir))
+                    continue;
+                try { Directory.Delete(dir, true); removed++; } catch (Exception e) { Logger.w(nameof(RemoteBrowserManager), $"Failed to delete profile {dir}: {e.Message}"); }
+            }
+            return removed;
+        }
+
         public static async Task<RemoteBrowserSession> CreateSessionAsync(string title, string url, string? userAgent, bool useMobileEmulation, string? injectJs, Action<InterceptorRequest> handler, CancellationToken cancellationToken = default)
         {
             EnsureInitialized();
@@ -73,11 +132,18 @@ namespace Grayjay.ClientServer.RemoteBrowser
             {
                 CleanupStaleProfiles();
                 session = new RemoteBrowserSession(title, url, userAgent, useMobileEmulation, injectJs, handler);
-                var profileDir = Path.Combine(GetProfileBaseDir(), "rb-" + session.Id);
+                var options = Ambient.Value;
+                bool headful = (options?.Headful ?? false) || Environment.GetEnvironmentVariable("GRAYJAY_REMOTE_BROWSER_HEADFUL") == "1";
+
+                // Reuse the remembered profile for this sign-in host unless another open session holds it (Chrome locks profiles).
+                var profileDir = GetPersistentProfileDir(url);
+                bool persistent = await WaitForProfileFreeAsync(profileDir, TimeSpan.FromSeconds(8), cancellationToken);
+                if (!persistent)
+                    profileDir = Path.Combine(GetProfileBaseDir(), "rb-" + session.Id);
 
                 using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
                 timeout.CancelAfter(StartTimeout);
-                await session.StartAsync(profileDir, timeout.Token);
+                await session.StartAsync(profileDir, timeout.Token, headful, persistent);
                 _sessions[session.Id] = session;
             }
             catch (Exception ex)

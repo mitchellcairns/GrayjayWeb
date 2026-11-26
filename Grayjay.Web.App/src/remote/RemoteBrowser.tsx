@@ -25,6 +25,8 @@ export default function RemoteBrowser(props: { session: RemoteBrowserSession; on
   const [accounts, setAccounts] = createSignal<YtAccount[] | null>(null);
   const [showPage, setShowPage] = createSignal(false);
   const [gotFrame, setGotFrame] = createSignal(false);
+  // Sign-in started on the computer running Grayjay opens a real browser window there instead of streaming.
+  const headful = !!props.session.headful;
 
   const send = (msg: object) => { if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg)); };
 
@@ -33,7 +35,7 @@ export default function RemoteBrowser(props: { session: RemoteBrowserSession; on
   // Size the remote viewport to this screen so pages lay out natively.
   const sendResize = () => {
     const r = stage.getBoundingClientRect();
-    if (r.width < 50 || r.height < 50) return;
+    if (headful || r.width < 50 || r.height < 50) return;
     send({ type: "resize", width: Math.round(r.width), height: Math.round(r.height), dpr: Math.min(3, devicePixelRatio || 2) });
   };
 
@@ -58,13 +60,14 @@ export default function RemoteBrowser(props: { session: RemoteBrowserSession; on
     };
 
     ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/RemoteBrowser/${encodeURIComponent(props.session.id)}/Stream`);
-    ws.addEventListener("open", () => { setConnected(true); sendResize(); });
+    ws.addEventListener("open", () => { setConnected(true); sendResize(); if (!headful) keyInput?.focus({ preventScroll: true }); });
     ws.addEventListener("close", () => setConnected(false));
     ws.addEventListener("message", (ev) => {
       let m: any;
       try { m = JSON.parse(ev.data); } catch { return; }
       switch (m.type) {
         case "frame":
+          if (headful) break;
           if (m.width && m.height) setFrameSize({ w: m.width, h: m.height });
           pending = m.data; draw();
           break;
@@ -100,7 +103,7 @@ export default function RemoteBrowser(props: { session: RemoteBrowserSession; on
     const { x, y } = toRemote(e);
     send({ type: "pointer", action, x, y, button: "left", pointerType: e.pointerType === "mouse" ? "mouse" : "touch" });
     // Tapping the page keeps the hidden input focused so the keyboard can appear for text fields.
-    if (action === "up" && e.pointerType !== "mouse") keyInput.focus({ preventScroll: true });
+    if (action === "up") keyInput.focus({ preventScroll: true });
   };
   const onWheel = (e: WheelEvent) => {
     e.preventDefault();
@@ -173,7 +176,20 @@ export default function RemoteBrowser(props: { session: RemoteBrowserSession; on
           </div>
         </Show>
 
-        <div class="rb-stage" ref={stage} hidden={!!accounts() && !showPage()}>
+        <Show when={headful && !accounts()}>
+          <div class="rb-accounts rb-headful">
+            <img src="/app/logo.svg" alt="" width="56" height="56" />
+            <h2>Finish signing in in the new window</h2>
+            <p class="muted">
+              A sign-in window for <b>{host()}</b> opened on this computer. Sign in there; this screen closes by itself when you're done.
+              Your account is remembered, so next time it's just a tap.
+            </p>
+            <p class="faint" style={{ "font-size": "13px" }}>Can't see it? Check your taskbar for a browser window.</p>
+            <button class="btn" onClick={cancel}>Cancel sign-in</button>
+          </div>
+        </Show>
+
+        <div class="rb-stage" ref={stage} hidden={headful || (!!accounts() && !showPage())}>
           <canvas
             ref={canvas}
             class="rb-canvas"

@@ -39,6 +39,9 @@ namespace Grayjay.ClientServer.RemoteBrowser
         public int Height { get; private set; }
         public double Dpr { get; private set; }
         public bool Mobile { get; }
+        /// <summary>[GrayjayWeb] Shown as a real window on the server's desktop instead of only being streamed.</summary>
+        public bool Headful { get; private set; }
+        private bool _persistentProfile;
         public DateTime CreatedAtUtc { get; } = DateTime.UtcNow;
         public DateTime LastActivityUtc { get; private set; } = DateTime.UtcNow;
         public bool IsStarted { get; private set; }
@@ -158,17 +161,19 @@ namespace Grayjay.ClientServer.RemoteBrowser
             _handler = handler ?? (_ => { });
         }
 
-        public object Describe() => new { id = Id, title = Title, url = Url, width = Width, height = Height, mobile = Mobile };
+        public object Describe() => new { id = Id, title = Title, url = Url, width = Width, height = Height, mobile = Mobile, headful = Headful };
 
         #region Startup
 
-        internal async Task StartAsync(string profileDir, CancellationToken cancellationToken)
+        internal async Task StartAsync(string profileDir, CancellationToken cancellationToken, bool headful = false, bool persistentProfile = false)
         {
             var exe = ChromiumLocator.FindOrThrow();
             _profileDir = profileDir;
+            _persistentProfile = persistentProfile;
+            Headful = headful;
             Directory.CreateDirectory(profileDir);
-
-            bool headful = Environment.GetEnvironmentVariable("GRAYJAY_REMOTE_BROWSER_HEADFUL") == "1";
+            // A reused profile still holds the previous run's port file; never connect to that stale endpoint.
+            try { File.Delete(Path.Combine(profileDir, "DevToolsActivePort")); } catch { }
             var psi = new ProcessStartInfo(exe)
             {
                 UseShellExecute = false,
@@ -320,7 +325,8 @@ namespace Grayjay.ClientServer.RemoteBrowser
                 args.Add("--headless=new");
             //Without this the screencast is captured at 1 physical px per CSS px regardless of the emulated DPR,
             //which looks blurry on phones. Frames are still capped by Page.startScreencast maxWidth/maxHeight.
-            if (Mobile)
+            // [GrayjayWeb] Not for visible windows: it would scale the real window on the desktop as well.
+            if (Mobile && !headful)
                 args.Add("--force-device-scale-factor=" + MaxScreencastScale.ToString(CultureInfo.InvariantCulture));
             if (_requestedUserAgent != null)
                 args.Add("--user-agent=" + _requestedUserAgent);
@@ -1656,7 +1662,7 @@ namespace Grayjay.ClientServer.RemoteBrowser
         private async Task DeleteProfileDirAsync()
         {
             var dir = _profileDir;
-            if (dir == null)
+            if (dir == null || _persistentProfile)
                 return;
             for (int i = 0; i < 10; i++)
             {

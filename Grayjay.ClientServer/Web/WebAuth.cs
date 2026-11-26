@@ -385,11 +385,21 @@ namespace Grayjay.ClientServer.Web
                 links.Add(new { label, url = $"{origin}{WebHostOptions.AppPath}/#pair={code}", secure });
             }
 
+            foreach (var configured in _options.PublicUrls)
+            {
+                var origin = configured.TrimEnd('/');
+                if (origin.EndsWith(WebHostOptions.AppPath, StringComparison.OrdinalIgnoreCase))
+                    origin = origin.Substring(0, origin.Length - WebHostOptions.AppPath.Length);
+                add("Configured address", origin, origin.StartsWith("https://", StringComparison.OrdinalIgnoreCase));
+            }
+
             var host = ctx.Request.Host.Host;
             bool requestIsLoopback = host == "localhost" || (IPAddress.TryParse(host, out var hostIp) && IPAddress.IsLoopback(hostIp));
             if (!requestIsLoopback)
                 add("This address", $"{(IsHttps(ctx) ? "https" : "http")}://{ctx.Request.Host}", IsHttps(ctx));
 
+            if (_options.PublicUrls.Count > 0)
+                return links;
             try
             {
                 foreach (var ni in NetworkInterface.GetAllNetworkInterfaces())
@@ -482,6 +492,10 @@ namespace Grayjay.ClientServer.Web
                     return;
                 }
                 context.Items["gj_device"] = device;
+                // Sign-in started from the computer running the server opens a real browser window there
+                // instead of a streamed one (flows into RemoteBrowserManager via AsyncLocal).
+                if (device.Method == "local")
+                    RemoteBrowser.RemoteBrowserManager.Ambient.Value = new RemoteBrowser.RemoteBrowserManager.RequestOptions() { Headful = true };
             }
 
             await _next(context);
