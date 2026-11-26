@@ -36,23 +36,44 @@ let playerBox: HTMLElement | null = null;
 export function registerPlayerBox(el: HTMLElement | null) { playerBox = el; }
 function animateLayoutChange(change: () => void) {
   const el = playerBox;
+  const watch = el?.closest<HTMLElement>(".watch");
   const first = el?.getBoundingClientRect();
   change();
-  if (!el || !first || first.width === 0 || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-  // Measure after Solid has applied the change (it may be deferred inside effects) but before the next paint.
-  requestAnimationFrame(() => {
-  const last = el.getBoundingClientRect();
-  if (last.width === 0 || last.height === 0) return;
-  const dx = first.left - last.left, dy = first.top - last.top;
-  const sx = first.width / last.width, sy = first.height / last.height;
-  if (Math.abs(dx) < 1 && Math.abs(dy) < 1 && Math.abs(sx - 1) < 0.01) return;
-  el.animate(
-    [
-      { transformOrigin: "top left", transform: `translate(${dx}px, ${dy}px) scale(${sx}, ${sy})`, borderRadius: "12px" },
-      { transformOrigin: "top left", transform: "none" },
-    ],
-    { duration: 340, easing: "cubic-bezier(0.2, 0.8, 0.2, 1)" },
-  );
+  if (!el || !watch || !first || first.width === 0 || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  // Measure once Solid has applied the change (a microtask: still before anything is painted).
+  queueMicrotask(() => {
+    const mode = watch.dataset.mode;
+    if (mode === "mini") {
+      // Shrink the whole mini-player (frame, shadow, controls) from where the video was. Both are 16:9, so it scales
+      // evenly. (Animating only the video inside it clipped it to the small box while the frame sat there already.)
+      const last = watch.getBoundingClientRect();
+      if (last.width === 0) return;
+      const s = first.width / last.width;
+      watch.animate(
+        [
+          { transformOrigin: "top left", transform: `translate(${first.left - last.left}px, ${first.top - last.top}px) scale(${s})`, borderRadius: "0px" },
+          { transformOrigin: "top left", transform: "none" },
+        ],
+        { duration: 320, easing: "cubic-bezier(0.2, 0.8, 0.2, 1)" },
+      );
+      return;
+    }
+    if (mode !== "full") return;
+    const last = el.getBoundingClientRect();
+    if (last.width === 0 || last.height === 0) return;
+    const dx = first.left - last.left, dy = first.top - last.top;
+    const sx = first.width / last.width, sy = first.height / last.height;
+    if (Math.abs(dx) < 1 && Math.abs(dy) < 1 && Math.abs(sx - 1) < 0.01) return;
+    el.animate(
+      [
+        { transformOrigin: "top left", transform: `translate(${dx}px, ${dy}px) scale(${sx}, ${sy})`, borderRadius: "12px" },
+        { transformOrigin: "top left", transform: "none" },
+      ],
+      { duration: 340, easing: "cubic-bezier(0.2, 0.8, 0.2, 1)" },
+    );
+    // The page behind fades out instead of being covered in one frame.
+    const panel = watch.querySelector<HTMLElement>(".watch-panel");
+    if (panel) panel.animate({ backgroundColor: ["transparent", getComputedStyle(panel).backgroundColor] }, { duration: 220, easing: "ease-out" });
   });
 }
 

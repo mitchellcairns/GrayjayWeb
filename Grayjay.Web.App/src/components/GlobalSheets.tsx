@@ -1,4 +1,4 @@
-import { For, Show, createSignal, onCleanup } from "solid-js";
+import { For, Show, createMemo, createSignal, onCleanup } from "solid-js";
 import { useNavigate } from "@solidjs/router";
 import type { Content } from "../api";
 import { bestThumbnail, formatDuration, joinDot } from "../lib/format";
@@ -27,13 +27,14 @@ export async function hideCreator(item: Content) {
 
 function CardMenu() {
   const navigate = useNavigate();
-  const item = ui.cardMenu;
+  // Keeps showing the last video while the sheet slides closed.
+  const item = createMemo<Content | null>((prev) => ui.cardMenu() ?? prev, null);
   const close = () => ui.setCardMenu(null);
-  const act = (f: (it: Content) => void) => () => { const it = item(); close(); if (it) f(it); };
+  const act = (f: (it: Content) => void) => () => { const it = ui.cardMenu(); close(); if (it) f(it); };
   const inQueue = () => queue.has(item()?.url);
 
   return (
-    <Sheet open={!!item()} onClose={close} title={<span class="card-menu-title">{item()?.name}</span>}>
+    <Sheet open={!!ui.cardMenu()} onClose={close} title={<span class="card-menu-title">{item()?.name}</span>}>
       <div class="list card-menu">
         <button class="list-item" onClick={act((it) => { const added = queue.toggle(it); toast(added ? "Added to queue" : "Removed from queue", "info", 1800); })}>
           <Icon name={inQueue() ? "queued" : "queueAdd"} /> <div class="grow title">{inQueue() ? "Remove from queue" : "Add to queue"}</div>
@@ -72,6 +73,7 @@ function QueueRow(props: {
     if (!it) return;
     if (player.mode() !== "closed") skip.rememberCurrent(); // a jump is a skip too: Previous comes back here
     player.playNow(it.url, it, it.resumeAt);
+    ui.setQueueOpen(false); // show the video instead of leaving the queue over it
   };
   const dragging = () => props.drag?.from === props.index;
   const onKey = (e: KeyboardEvent) => {

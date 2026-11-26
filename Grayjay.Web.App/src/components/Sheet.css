@@ -1,13 +1,17 @@
 dialog.sheet {
   padding: 0; border: 0; background: transparent; color: var(--text);
   max-width: none; max-height: none; width: 100%; height: 100%; margin: 0; inset: 0;
-  display: flex; align-items: flex-end; justify-content: center; overflow: hidden;
+  display: flex; align-items: flex-end; justify-content: center; overflow: hidden; overflow: clip;
 }
 dialog.sheet:not([open]) { display: none; }
 dialog.sheet::backdrop { background: var(--scrim); animation: scrim-in 0.2s ease; }
 /* Blurring whatever is behind (often a playing video) while the panel slides in flickers on phone GPUs: blur on desktop only. */
 @media (pointer: fine) { dialog.sheet::backdrop { backdrop-filter: blur(2px); -webkit-backdrop-filter: blur(2px); } }
 @keyframes scrim-in { from { opacity: 0; } }
+/* Closing: the scrim fades while the panel slides out (Sheet.tsx drives the panel). Taps wait until it's gone. */
+dialog.sheet.closing { pointer-events: none; }
+dialog.sheet.closing::backdrop { animation: scrim-out 0.22s linear forwards; }
+@keyframes scrim-out { to { opacity: 0; } }
 
 .sheet-panel {
   width: 100%; max-width: 640px; background: var(--bg-elev); border-radius: var(--radius-l) var(--radius-l) 0 0;
@@ -16,7 +20,7 @@ dialog.sheet::backdrop { background: var(--scrim); animation: scrim-in 0.2s ease
   padding-bottom: var(--safe-bottom);
   transition: transform 0.25s var(--ease);
   animation: sheet-in 0.28s var(--ease);
-  will-change: transform; backface-visibility: hidden; contain: layout paint;
+  will-change: transform; backface-visibility: hidden; contain: layout paint; outline: none;
 }
 .sheet-tall .sheet-panel { height: calc(88dvh - var(--safe-top)); }
 .sheet-full .sheet-panel { height: calc(100dvh - var(--safe-top) - 8px); max-width: 900px; }
@@ -28,6 +32,7 @@ dialog.sheet::backdrop { background: var(--scrim); animation: scrim-in 0.2s ease
   .sheet-tall .sheet-panel, .sheet-full .sheet-panel { height: min(86dvh, 900px); }
   .sheet-grabber { display: none; }
   @keyframes sheet-pop { from { transform: scale(0.96); opacity: 0; } }
+  dialog.sheet.closing::backdrop { animation-duration: 0.16s; } /* matches CLOSE_MS_WIDE */
 }
 
 .sheet-head { flex: none; touch-action: none; padding-top: 8px; }

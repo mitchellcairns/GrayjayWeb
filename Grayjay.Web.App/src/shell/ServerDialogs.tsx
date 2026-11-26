@@ -1,4 +1,4 @@
-import { For, Show, createSignal, onCleanup } from "solid-js";
+import { For, Show, createMemo, createSignal, onCleanup } from "solid-js";
 import { dialogs } from "../api";
 import { on } from "../api/socket";
 import Sheet from "../components/Sheet";
@@ -10,6 +10,8 @@ interface RemoteDialog { icon?: string; text: string; textDetails?: string; code
 export default function ServerDialogs() {
   const [queue, setQueue] = createSignal<{ id: string; dialog: RemoteDialog }[]>([]);
   const current = () => queue()[0];
+  // Keeps showing the last dialog while the sheet slides closed.
+  const shown = createMemo<ReturnType<typeof current> | undefined>((prev) => current() ?? prev);
 
   const offs = [
     on<RemoteDialog>("Dialog", (p) => { if (p.id && p.payload) setQueue((q) => [...q, { id: p.id!, dialog: p.payload }]); }),
@@ -29,16 +31,16 @@ export default function ServerDialogs() {
   };
 
   return (
-    <Sheet open={!!current()} onClose={() => respond(current()?.dialog.defaultCloseAction ?? -1)} title={current()?.dialog.text}>
-      <Show when={current()}>
+    <Sheet open={!!current()} onClose={() => respond(current()?.dialog.defaultCloseAction ?? -1)} title={shown()?.dialog.text}>
+      <Show when={shown()}>
         <div class="stack">
-          <Show when={current()!.dialog.textDetails}><p class="muted" style={{ "white-space": "pre-wrap" }}>{current()!.dialog.textDetails}</p></Show>
-          <Show when={current()!.dialog.code}>
-            <pre style={{ "white-space": "pre-wrap", "font-size": "12px", background: "var(--bg-elev-2)", padding: "12px", "border-radius": "var(--radius)", "max-height": "40vh", overflow: "auto" }}>{current()!.dialog.code}</pre>
+          <Show when={shown()!.dialog.textDetails}><p class="muted" style={{ "white-space": "pre-wrap" }}>{shown()!.dialog.textDetails}</p></Show>
+          <Show when={shown()!.dialog.code}>
+            <pre style={{ "white-space": "pre-wrap", "font-size": "12px", background: "var(--bg-elev-2)", padding: "12px", "border-radius": "var(--radius)", "max-height": "40vh", overflow: "auto" }}>{shown()!.dialog.code}</pre>
           </Show>
           <div class="row" style={{ "justify-content": "flex-end", "flex-wrap": "wrap" }}>
-            <For each={current()!.dialog.actions ?? []}>
-              {(a, i) => <button class={`btn ${i() === (current()!.dialog.actions!.length - 1) ? "accent" : ""}`} onClick={() => respond(i())}>{a.text}</button>}
+            <For each={shown()!.dialog.actions ?? []}>
+              {(a, i) => <button class={`btn ${i() === (shown()!.dialog.actions!.length - 1) ? "accent" : ""}`} onClick={() => respond(i())}>{a.text}</button>}
             </For>
           </div>
         </div>

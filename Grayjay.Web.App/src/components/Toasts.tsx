@@ -6,7 +6,16 @@ interface Toast { id: number; text: string; kind: "info" | "error"; action?: Toa
 const [toasts, setToasts] = createSignal<Toast[]>([]);
 let nextId = 1;
 
-const dismiss = (id: number) => setToasts((t) => t.filter((x) => x.id !== id));
+// Leaving toasts fade out first instead of vanishing (same objects, so <For> doesn't rebuild and replay the entrance).
+const [leaving, setLeaving] = createSignal<ReadonlySet<number>>(new Set());
+const dismiss = (id: number) => {
+  if (leaving().has(id) || !toasts().some((x) => x.id === id)) return;
+  setLeaving((s) => new Set(s).add(id));
+  setTimeout(() => {
+    setToasts((t) => t.filter((x) => x.id !== id));
+    setLeaving((s) => { const n = new Set(s); n.delete(id); return n; });
+  }, 180);
+};
 
 export function toast(text: string, kind: "info" | "error" = "info", ms = 3500, action?: ToastAction) {
   const id = nextId++;
@@ -28,7 +37,7 @@ export default function Toasts() {
     <Portal>
       <div class="toasts" role="status" aria-live="polite">
         <For each={toasts()}>{(t) => (
-          <div class={`toast ${t.kind}`} classList={{ "has-action": !!t.action }}>
+          <div class={`toast ${t.kind}`} classList={{ "has-action": !!t.action, leaving: leaving().has(t.id) }}>
             <span>{t.text}</span>
             <Show when={t.action}>
               <button class="toast-action" onClick={() => { dismiss(t.id); t.action!.run(); }}>{t.action!.label}</button>

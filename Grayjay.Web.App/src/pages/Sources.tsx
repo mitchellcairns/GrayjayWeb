@@ -1,4 +1,4 @@
-import { For, Show, createResource, createSignal, onCleanup } from "solid-js";
+import { For, Show, createMemo, createResource, createSignal, onCleanup } from "solid-js";
 import { SourceConfig, remoteBrowser, sources } from "../api";
 import { on } from "../api/socket";
 import Icon from "../components/Icon";
@@ -31,6 +31,7 @@ export default function Sources() {
   const [disabled, { refetch: refetchDisabled }] = createResource(() => sources.disabled());
   const [official, { refetch: refetchOfficial }] = createResource(() => sources.official().catch(() => []));
   const [selected, setSelected] = createSignal<string | null>(null);
+  const lastSelected = createMemo<string | null>((prev) => selected() ?? prev, null); // shown while the sheet slides closed
   const [installUrl, setInstallUrl] = createSignal("");
   const [installing, setInstalling] = createSignal<Set<string>>(new Set<string>());
   const [busy, setBusy] = createSignal(false);
@@ -141,8 +142,8 @@ export default function Sources() {
       </main>
 
       <Sheet open={!!selected()} onClose={() => setSelected(null)} title="Source">
-        <Show when={selected()}>
-          <SourceDetailsView id={selected()!} onChanged={refresh} onRemoved={() => { setSelected(null); refresh(); }} />
+        <Show when={lastSelected()}>
+          <SourceDetailsView id={lastSelected()!} onChanged={refresh} onRemoved={() => { setSelected(null); refresh(); }} />
         </Show>
       </Sheet>
     </>
