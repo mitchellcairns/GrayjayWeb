@@ -20,14 +20,22 @@ namespace Grayjay.ClientServer.Proxy
                 _listener.Server.DualMode = true;
         }
 
+        /// <summary>
+        /// [GrayjayWeb] When set (web mode), proxy URLs handed to clients are same-origin relative paths
+        /// ("{PublicPrefix}/{id}") served by <see cref="Web.WebProxyForwarder"/> instead of http://127.0.0.1:port/{id}.
+        /// </summary>
+        public static string? PublicPrefix { get; set; } = null;
+
         public string Add(HttpProxyRegistryEntry entry, IPAddress? localAddress = null)
         {
-            if ((LocalEndPoint.Address.Equals(IPAddress.Any) || LocalEndPoint.Address.Equals(IPAddress.IPv6Any)) && localAddress == null)
+            if (PublicPrefix == null && (LocalEndPoint.Address.Equals(IPAddress.Any) || LocalEndPoint.Address.Equals(IPAddress.IPv6Any)) && localAddress == null)
                 throw new ArgumentException("When adding a proxy on any, you must specify the local address.");
 
             var id = Guid.NewGuid();
             entry.Id = id;
             _entries.AddOrUpdate(id, entry, (i, e) => entry);
+            if (PublicPrefix != null && IPAddress.IsLoopback(LocalEndPoint.Address))
+                return $"{PublicPrefix}/{id}";
             return $"http://{(localAddress ?? LocalEndPoint.Address).ToUrlAddress()}:{LocalEndPoint.Port}/{id}";
         }
         public void Remove(Guid id)

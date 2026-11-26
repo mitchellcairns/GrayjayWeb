@@ -1,0 +1,41 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- [GrayjayWeb] Headless host: runs the Grayjay engine + API as a self-hosted web app backend (no CEF window). -->
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <OutputType>Exe</OutputType>
+    <RuntimeIdentifiers>win-x64;win-arm64;linux-x64;linux-arm64;osx-x64;osx-arm64</RuntimeIdentifiers>
+    <RuntimeIdentifier Condition="'$(RuntimeIdentifier)' == ''">$(NETCoreSdkPortableRuntimeIdentifier)</RuntimeIdentifier>
+    <AssemblyName>GrayjayWebServer</AssemblyName>
+    <RootNamespace>Grayjay.Web.Host</RootNamespace>
+    <ApplicationIcon>..\Grayjay.ClientServer\logo.ico</ApplicationIcon>
+    <InvariantGlobalization>false</InvariantGlobalization>
+    <!-- Dev builds are framework-dependent; allow running on a newer installed runtime. Release is self-contained. -->
+    <RollForward>LatestMajor</RollForward>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)'=='Release'">
+    <DebugSymbols>False</DebugSymbols>
+    <DebugType>None</DebugType>
+    <SelfContained>true</SelfContained>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="libsodium" Version="1.0.20" />
+    <PackageReference Include="Microsoft.ClearScript.V8.Native.osx-arm64" Version="7.4.5" />
+    <PackageReference Include="Microsoft.ClearScript.V8.Native.win-x64" Version="7.4.5" />
+    <PackageReference Include="Microsoft.ClearScript.V8.Native.linux-x64" Version="7.4.5" />
+    <PackageReference Include="Microsoft.ClearScript.V8.Native.linux-arm64" Version="7.4.5" />
+    <PackageReference Include="Microsoft.ClearScript.V8.Native.osx-x64" Version="7.4.5" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Grayjay.ClientServer\Grayjay.ClientServer.csproj" />
+  </ItemGroup>
+  <!-- Ship the built PWA next to the server as ./app when it exists. -->
+  <ItemGroup>
+    <Content Include="..\Grayjay.Web.App\dist\**\*" Condition="Exists('..\Grayjay.Web.App\dist\index.html')">
+      <Link>app\%(RecursiveDir)%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
+  </ItemGroup>
+</Project>

@@ -124,6 +124,16 @@ public static class Directories
     }
 
     private static string? _baseDirectory;
+
+    /// <summary>
+    /// [GrayjayWeb] Overrides the data directory. Must be called before anything touches <see cref="Base"/>.
+    /// </summary>
+    public static void SetBase(string dir)
+    {
+        EnsureDirectoryExists(dir);
+        _baseDirectory = dir;
+    }
+
     public static string Base
     {
         get

@@ -11,6 +11,7 @@ using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 using Grayjay.Engine.Packages;
 using System.Collections.Concurrent;
+using Grayjay.ClientServer.Web;
 
 namespace Grayjay.ClientServer
 {
@@ -33,6 +34,11 @@ namespace Grayjay.ClientServer
         public string? BaseUrl { get; private set; } = null;
 
         public bool UseTokenSecurity { get; private set; } = true;
+
+        /// <summary>[GrayjayWeb] Set to run as a self-hosted web app backend. See <see cref="WebHostOptions"/>.</summary>
+        public WebHostOptions? Web { get; set; } = null;
+        public WebAuth? WebAuth { get; private set; } = null;
+        public bool IsWebMode => Web != null;
         private ConcurrentDictionary<string, string> _tokens = new ConcurrentDictionary<string, string>();
 
         public GrayjayServer(IWindowProvider windowProvider = null, bool isHeadlessMode = false, bool isServerMode = false, bool tokenSecurity = true)
@@ -52,9 +58,26 @@ namespace Grayjay.ClientServer
                 PackageBridge.AppVersion = Constants.App.Version;
 
             var builder = WebApplication.CreateBuilder();
+            if (Web != null)
+            {
+                WebAuth = new WebAuth(Web);
+                HttpProxy.PublicPrefix = WebProxyForwarder.Prefix;
+                builder.Services.AddSingleton(Web);
+                builder.Services.AddSingleton(WebAuth);
+            }
+
             builder.WebHost.ConfigureKestrel(serverOptions =>
             {
-                if (ServerMode)
+                if (Web != null)
+                {
+                    Logger.Info<GrayjayServer>($"Running in Web mode, listening on {Web.ListenAddress}:{Web.Port}");
+                    serverOptions.Listen(Web.ListenAddress, Web.Port);
+                    if (Web.ListenAddress.Equals(IPAddress.Any) && System.Net.Sockets.Socket.OSSupportsIPv6)
+                    {
+                        try { serverOptions.Listen(IPAddress.IPv6Loopback, Web.Port); } catch { }
+                    }
+                }
+                else if (ServerMode)
                 {
                     Logger.Info<GrayjayServer>("Running in Server mode, listening to all ips on port 11338");
                     serverOptions.Listen(IPAddress.Any, 11338);
@@ -82,6 +105,13 @@ namespace Grayjay.ClientServer
             _app = builder.Build();
 
             _app.UseExceptionHandler(o => { });
+            if (Web != null)
+            {
+                // Must run before websockets, static files and controllers so every non-public route is authenticated.
+                _app.UseMiddleware<WebAuthMiddleware>();
+                // Static files must run before routing, or the SPA fallback endpoint would shadow them.
+                UseWebAppStaticFiles(_app, Web);
+            }
             _app.UseWebSockets();
             _app.UseRouting();
             _app.MapControllers();
@@ -92,19 +122,29 @@ namespace Grayjay.ClientServer
                 var address = addressFeature.Addresses.First();
 
                 Logger.i(nameof(GrayjayServer), $"RunServerAsync: Server running on {address}.");
-                BaseUri = new Uri(address);
+                BaseUri = new Uri(address.Replace("://0.0.0.0", "://127.0.0.1").Replace("://[::]", "://127.0.0.1"));
                 BaseUrl = address;
                 if (BaseUrl.EndsWith('/'))
                     BaseUrl = BaseUrl.Substring(0, BaseUrl.Length - 1);
+                // In web mode every URL handed to clients must be same-origin relative: the browser may be on another device.
+                if (Web != null)
+                    BaseUrl = "";
 
                 StartedResetEvent.Set();
             });
 
-            _app.MapGet("/", () =>
+            if (Web != null)
             {
-                Results.Redirect(GetIndexUrl());
-
-            });
+                _app.MapGet("/", () => Results.Redirect(WebHostOptions.AppPath + "/"));
+                WebAuth!.MapEndpoints(_app);
+                WebProxyForwarder.Map(_app);
+                MapWebApp(_app, Web);
+                WebEndpointsHook?.Invoke(_app);
+            }
+            else
+            {
+                _app.MapGet("/", () => Results.Redirect(GetIndexUrl()));
+            }
             _app.MapGet("/dev", () => Results.Redirect("/Developer/Index"));
             _app.MapGet("/Developer/source.js", () => Results.Redirect("/Developer/Source"));
             _app.MapGet("/Developer/dev_bridge.js", () => Results.Redirect("/Developer/DevBridge"));
@@ -184,7 +224,8 @@ namespace Grayjay.ClientServer
             if (GrayjaySettings.Instance.Synchronization.Enabled)
                 await StateSync.Instance.StartAsync();
 
-            _app.UseMiddleware<TokenMiddleware>(this);
+            if (Web == null)
+                _app.UseMiddleware<TokenMiddleware>(this);
             _app.UseMiddleware<RequestLoggingMiddleware>();
             Logger.i(nameof(GrayjayServer), $"RunServerAsync: _app.RunAsync(cancellationToken) starting...");
             _ = Task.Run(async () =>
@@ -202,6 +243,65 @@ namespace Grayjay.ClientServer
             await _app.RunAsync(cancellationToken);
             Logger.i(nameof(GrayjayServer), $"RunServerAsync: _app.RunAsync(cancellationToken) finished.");
         }
+        /// <summary>[GrayjayWeb] Extra endpoints to map in web mode (e.g. the remote login browser).</summary>
+        public static Action<WebApplication>? WebEndpointsHook { get; set; }
+
+        private static bool HasWebApp(WebHostOptions web)
+            => web.AppRoot != null && Directory.Exists(web.AppRoot) && File.Exists(Path.Combine(web.AppRoot, "index.html"));
+
+        private static void UseWebAppStaticFiles(WebApplication app, WebHostOptions web)
+        {
+            if (!HasWebApp(web))
+                return;
+            string root = web.AppRoot!;
+            Logger.i(nameof(GrayjayServer), $"Serving PWA from '{root}' at {WebHostOptions.AppPath}.");
+            var provider = new Microsoft.AspNetCore.StaticFiles.FileExtensionContentTypeProvider();
+            provider.Mappings[".webmanifest"] = "application/manifest+json";
+            app.UseStaticFiles(new StaticFileOptions
+            {
+                FileProvider = new PhysicalFileProvider(root),
+                RequestPath = WebHostOptions.AppPath,
+                ContentTypeProvider = provider,
+                OnPrepareResponse = (ctx) =>
+                {
+                    var headers = ctx.Context.Response.Headers;
+                    headers["Referrer-Policy"] = "no-referrer";
+                    headers["X-Content-Type-Options"] = "nosniff";
+                    var name = ctx.File.Name;
+                    if (ctx.Context.Request.Path.StartsWithSegments(WebHostOptions.AppPath + "/assets"))
+                        headers["Cache-Control"] = "public, max-age=31536000, immutable";
+                    else
+                        headers["Cache-Control"] = "no-cache";
+                    if (name == "sw.js")
+                        headers["Service-Worker-Allowed"] = WebHostOptions.AppPath + "/";
+                }
+            });
+        }
+
+        /// <summary>[GrayjayWeb] Serves the PWA under /app with an SPA fallback and PWA-friendly caching.</summary>
+        private static void MapWebApp(WebApplication app, WebHostOptions web)
+        {
+            string? root = web.AppRoot;
+            if (root == null || !Directory.Exists(root) || !File.Exists(Path.Combine(root, "index.html")))
+            {
+                Logger.w(nameof(GrayjayServer), $"PWA not found at '{root}'. Build Grayjay.Web.App (npm run build) or pass --app-root.");
+                app.MapGet(WebHostOptions.AppPath + "/{**rest}", () => Results.Content(
+                    "<!doctype html><meta name=viewport content='width=device-width'><body style='font-family:system-ui;background:#111;color:#eee;padding:2rem'>" +
+                    "<h1>Grayjay Web</h1><p>The server is running, but the web app has not been built.</p><p>Run <code>npm install && npm run build</code> in <code>Grayjay.Web.App</code>.</p>",
+                    "text/html"));
+                return;
+            }
+
+            var index = Path.Combine(root, "index.html");
+            app.MapFallback(WebHostOptions.AppPath + "/{**rest:nonfile}", async (HttpContext ctx) =>
+            {
+                ctx.Response.ContentType = "text/html; charset=utf-8";
+                ctx.Response.Headers["Cache-Control"] = "no-cache";
+                ctx.Response.Headers["Referrer-Policy"] = "no-referrer";
+                await ctx.Response.SendFileAsync(index);
+            });
+        }
+
         public async Task StopServer()
         {
             //TODO: Stop other things?
