@@ -11,6 +11,8 @@ import Icon from "./Icon";
 import Sheet from "./Sheet";
 import { toast, toastAction, toastError } from "./Toasts";
 import "./GlobalSheets.css";
+import { ContinueBar } from "./Handoff";
+import { watchLater } from "../lib/watchLater";
 
 /** Hide a creator everywhere, with Undo (it's easy to hit by accident). */
 export async function hideCreator(item: Content) {
@@ -37,6 +39,9 @@ function CardMenu() {
         </button>
         <button class="list-item" onClick={act((it) => { queue.addNext(it); toast("Plays next", "info", 1800); })}>
           <Icon name="skip" /> <div class="grow title">Play next</div>
+        </button>
+        <button class="list-item" onClick={act((it) => { watchLater.toggle(it).then((added) => toast(added ? "Saved to Watch later" : "Removed from Watch later", "info", 1800)).catch(toastError); })}>
+          <Icon name="later" /> <div class="grow title">{watchLater.has(item()?.url) ? "Remove from Watch later" : "Save to Watch later"}</div>
         </button>
         <Show when={item()?.author?.url}>
           <button class="list-item" onClick={act((it) => navigate(channelHref(it.author!.url)))}>
@@ -126,5 +131,5 @@ export function QueueButton(props: { class?: string }) {
 }
 
 export default function GlobalSheets() {
-  return (<><CardMenu /><QueueSheet /></>);
+  return (<><CardMenu /><QueueSheet /><ContinueBar /></>);
 }

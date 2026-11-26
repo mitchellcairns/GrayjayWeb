@@ -1,9 +1,12 @@
-// Play queue: what plays after the current video (before any "Up next" recommendation). Per device, survives reloads.
+// Play queue: what plays after the current video (before any "Up next" recommendation). One queue shared by all your
+// devices through the server; cached in localStorage so it shows instantly and survives a flaky connection.
 import { createRoot } from "solid-js";
-import type { Content } from "../api";
+import { Content, deviceSync } from "../api";
+import { on } from "../api/socket";
 import { stored } from "../lib/stored";
+import { self } from "../lib/self";
 
-/** Only what the queue UI and the player's preview need, so localStorage stays small. */
+/** Only what the queue UI and the player's preview need. */
 function slim(c: Content): Content {
   return {
     contentType: c.contentType, id: c.id, name: c.name ?? c.contentName, url: c.url, author: c.author,
@@ -12,8 +15,34 @@ function slim(c: Content): Content {
 }
 
 export const queue = createRoot(() => {
-  const [items, setItems] = stored<Content[]>("gj.queue", []);
+  const [items, setLocal] = stored<Content[]>("gj.queue", []);
+  let pushTimer: number | undefined;
+  let pending = false;
+
+  const push = () => {
+    pending = true;
+    clearTimeout(pushTimer);
+    pushTimer = window.setTimeout(async () => {
+      try { await deviceSync.saveQueue(items(), self.clientId); } catch { }
+      pending = false;
+    }, 250);
+  };
+  const setItems = (l: Content[]) => { setLocal(l); push(); };
+
+  const pull = async () => {
+    try {
+      const s = await deviceSync.queue();
+      if (pending) return; // our own newer change is on its way up
+      if (!s.saved && items().length) { push(); return; } // first run with sync: upload this device's queue
+      setLocal(s.items ?? []);
+    } catch { }
+  };
+  pull();
+  on("QueueChanged", () => pull());
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") pull(); });
+
   const has = (url?: string) => !!url && items().some((i) => i.url === url);
+  const remove = (url: string) => { if (has(url)) setItems(items().filter((i) => i.url !== url)); };
   return {
     items,
     has,
@@ -21,11 +50,11 @@ export const queue = createRoot(() => {
     add(c: Content) { if (!has(c.url)) setItems([...items(), slim(c)]); },
     /** Put it at the front (plays right after the current video). */
     addNext(c: Content) { setItems([slim(c), ...items().filter((i) => i.url !== c.url)]); },
-    remove(url: string) { setItems(items().filter((i) => i.url !== url)); },
+    remove,
     /** One-tap add/remove; returns true when it's now in the queue. */
     toggle(c: Content) {
-      if (has(c.url)) { this.remove(c.url); return false; }
-      this.add(c); return true;
+      if (has(c.url)) { remove(c.url); return false; }
+      setItems([...items(), slim(c)]); return true;
     },
     move(index: number, delta: number) {
       const l = [...items()], j = index + delta;
@@ -42,7 +71,7 @@ export const queue = createRoot(() => {
     },
     take(url: string): Content | undefined {
       const it = items().find((i) => i.url === url);
-      if (it) this.remove(url);
+      if (it) remove(url);
       return it;
     },
   };

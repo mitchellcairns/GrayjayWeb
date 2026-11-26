@@ -1,0 +1,16 @@
+.continue-pill {
+  position: fixed; z-index: 35; left: 50%; transform: translateX(calc(-50% + var(--rail-w) / 2));
+  bottom: calc(var(--tabbar-h) + var(--safe-bottom) + 10px); width: max-content; max-width: min(420px, calc(100vw - var(--rail-w) - 24px));
+  display: flex; align-items: center; gap: 2px; padding: 4px 4px 4px 4px; border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-elev) 92%, transparent); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--line); box-shadow: var(--shadow); animation: toast-in 0.3s var(--ease);
+}
+.continue-main { min-width: 0; display: flex; align-items: center; gap: 8px; border: 0; background: none; color: inherit; text-align: left; cursor: pointer; padding: 0 6px 0 0; }
+.continue-play { flex: none; width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; background: var(--accent); color: var(--accent-text); }
+.continue-text { min-width: 0; display: flex; flex-direction: column; line-height: 1.2; }
+.continue-kicker { font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.continue-title { font-size: 12px; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 300px; }
+.continue-x { flex: none; width: 28px; height: 28px; border: 0; border-radius: 50%; background: none; color: var(--text-2); display: grid; place-items: center; cursor: pointer; }
+.continue-x:hover { background: var(--bg-elev-2); color: var(--text); }
+/* Toasts sit just above the pill instead of on top of it. */
+html:has(.continue-pill) .toasts { bottom: calc(var(--tabbar-h) + var(--mini-h) + var(--safe-bottom) + 64px); }

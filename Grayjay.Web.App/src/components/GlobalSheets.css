@@ -25,3 +25,6 @@
 .queue-ctl { display: flex; flex-direction: column; }
 .queue-ctl .icon-btn { width: 30px; height: 24px; border-radius: 6px; }
 .queue-ctl .icon-btn:disabled { opacity: 0.3; }
+.later-row { display: flex; align-items: flex-start; gap: 4px; }
+.later-row > .card-item { flex: 1; min-width: 0; }
+.watch-actions .btn.is-on { color: var(--accent); }

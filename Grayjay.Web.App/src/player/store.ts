@@ -78,7 +78,7 @@ function createPlayerStore() {
   let openedViaPush = false;
   let loadToken = 0;
 
-  async function load(target: string) {
+  async function load(target: string, startOverride?: number) {
     const token = ++loadToken;
     queue.remove(target); // playing something you'd queued takes it off the queue
     batch(() => {
@@ -97,7 +97,7 @@ function createPlayerStore() {
       setVideo(v);
       const duration = v.duration ?? 0;
       // Resume where you left off unless you'd finished it.
-      setStartAt(position && duration && position < duration - 15 ? position : 0);
+      setStartAt(startOverride ?? (position && duration && position < duration - 15 ? position : 0));
       let [src, maxHeight] = await Promise.all([details.sourceAuto(target), targetHeight().catch(() => 0)]);
       if (token !== loadToken) return;
       const vi0 = src.videoIndex ?? -1;
@@ -136,14 +136,18 @@ function createPlayerStore() {
     bindNavigation(bridge: NavBridge) { nav = bridge; },
 
     /** Open a video full screen (adds ?watch= to the URL so Back minimizes it, like native apps). */
-    open(target: string, previewItem?: Content) {
+    open(target: string, previewItem?: Content, startAt?: number) {
       if (target !== url()) {
         unlock();
         batch(() => {
           setPreview(previewItem ?? null);
           setUrl(target);
         });
-        load(target);
+        load(target, startAt);
+      } else if (startAt != null) {
+        // Already loaded here: jump to the handed-over position.
+        const el = videoEl();
+        if (el) { el.currentTime = startAt; el.play().catch(() => { }); }
       }
       setMode("full");
       openedViaPush = true;

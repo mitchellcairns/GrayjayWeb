@@ -239,3 +239,24 @@ export const hiddenCreators = {
   add: (c: HiddenCreator) => post("/web/hidden/Add", c),
   remove: (c: HiddenCreator) => post("/web/hidden/Remove", c),
 };
+
+// [GrayjayWeb] Follows you between devices: shared queue, what's playing where (for "Continue here").
+export interface NowPlayingState {
+  deviceId: string; deviceName?: string; url?: string; name?: string; thumbnail?: string; author?: string;
+  position: number; duration: number; playing: boolean; audioOnly: boolean; updatedAt: string;
+}
+export interface DeviceCommand { targetId: string; kind: "pause"; fromId?: string; fromName?: string }
+export const deviceSync = {
+  queue: () => get<{ items: Content[]; saved: boolean; updatedAt?: string; updatedBy?: string }>("/web/queue"),
+  saveQueue: (items: Content[], clientId: string) => post(`/web/queue?clientId=${q(clientId)}`, items),
+  nowPlaying: () => get<{ now: string; devices: NowPlayingState[] }>("/web/nowplaying"),
+  report: (s: Partial<NowPlayingState> & { clientId: string; heartbeat?: boolean }) => post("/web/nowplaying", s),
+  command: (c: DeviceCommand & { clientId: string }) => post("/web/device/Command", c),
+};
+
+// Watch later (server-side; also syncs with Grayjay Android/Desktop over Grayjay Sync).
+export const watchLater = {
+  all: () => get<Content[]>("/WatchLater/GetAll"),
+  add: (video: Content) => post("/WatchLater/Add", { ...video, index: 0 }),
+  remove: (url: string) => get(`/WatchLater/Remove?url=${q(url)}`),
+};
