@@ -5,7 +5,7 @@ import { bestThumbnail, formatDuration } from "../lib/format";
 import Icon from "../components/Icon";
 import { player, prefs } from "./store";
 import { QueueButton } from "../components/GlobalSheets";
-import { consumeSuppressedTap, suppressNextTap } from "./gesture";
+import { consumeSuppressedTap } from "./gesture";
 import { toast } from "../components/Toasts";
 import "./VideoPlayer.css";
 
@@ -400,27 +400,6 @@ export default function VideoPlayer(props: {
     document.removeEventListener("webkitfullscreenchange", onFsChange);
   });
 
-  // ---------- Swipe: down leaves fullscreen, up enters it (touch) ----------
-  let swipe: { x: number; y: number } | null = null;
-  const onSwipeStart = (e: TouchEvent) => {
-    if (props.mini || e.touches.length !== 1 || (e.target as Element).closest?.(".vp-bar, .vp-menu, .vp-volume")) { swipe = null; return; }
-    swipe = { x: e.touches[0].clientX, y: e.touches[0].clientY };
-  };
-  const onSwipeMove = (e: TouchEvent) => {
-    if (!swipe) return;
-    const dy = e.touches[0].clientY - swipe.y;
-    if (Math.abs(dy) > 14) suppressNextTap(); // it's a swipe, not a tap: don't also toggle the controls
-  };
-  const onSwipeEnd = (e: TouchEvent) => {
-    if (!swipe) return;
-    const t = e.changedTouches[0];
-    const dx = t.clientX - swipe.x, dy = t.clientY - swipe.y;
-    swipe = null;
-    if (Math.abs(dy) < 70 || Math.abs(dy) < Math.abs(dx) * 1.5) return;
-    if (fullscreen() && dy > 0) toggleFullscreen();
-    else if (!fullscreen() && dy < 0) toggleFullscreen();
-  };
-
   const pipSupported = () => !!(document.pictureInPictureEnabled || (el as any)?.webkitSupportsPresentationMode?.("picture-in-picture"));
   const togglePip = async () => {
     try {
@@ -607,9 +586,6 @@ export default function VideoPlayer(props: {
       class="vp"
       classList={{ mini: props.mini, "app-fullscreen": appFs(), "controls-on": controls() || !playing() || !!menu(), fullscreen: fullscreen(), "fine-pointer": finePointer }}
       onPointerMove={(e) => { if (e.pointerType === "mouse" && !props.mini) poke(); }}
-      onTouchStart={onSwipeStart}
-      onTouchMove={onSwipeMove}
-      onTouchEnd={onSwipeEnd}
       onMouseLeave={() => { if (playing() && !menu()) setControls(false); }}
     >
       <video
@@ -672,7 +648,7 @@ export default function VideoPlayer(props: {
       <Show when={!props.mini && !props.error && !playError()}>
         <div class="vp-controls" aria-hidden={!controls() && !menu()}>
           <div class="vp-top">
-            <button class="icon-btn vp-exit" aria-label={fullscreen() ? "Exit full screen" : "Minimize"} title={fullscreen() ? "Exit full screen (or swipe down)" : "Minimize"} onClick={() => (fullscreen() ? toggleFullscreen() : player.minimize())}><Icon name="down" /></button>
+            <button class="icon-btn vp-exit" aria-label={fullscreen() ? "Exit full screen" : "Minimize"} title={fullscreen() ? "Exit full screen" : "Minimize"} onClick={() => (fullscreen() ? toggleFullscreen() : player.minimize())}><Icon name="down" /></button>
             <div class="vp-title">{fullscreen() ? props.video?.name : ""}</div>
             <button class="vp-btn vp-audio-btn" classList={{ on: prefs.audioOnly() }} aria-pressed={prefs.audioOnly()}
               aria-label={prefs.audioOnly() ? "Switch back to video" : "Audio only"} title={prefs.audioOnly() ? "Back to video (a)" : "Audio only — screen can turn off (a)"} onClick={() => { toggleAudioOnly(); poke(); }}>

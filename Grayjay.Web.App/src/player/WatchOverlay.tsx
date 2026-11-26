@@ -193,7 +193,7 @@ export default function WatchOverlay() {
   let startY = 0, startX = 0, dy = 0, tracking = false, panel!: HTMLDivElement;
   const onTouchStart = (e: TouchEvent) => {
     if (mode() !== "full" || e.touches.length !== 1) return;
-    // In fullscreen the player's own swipe-down leaves fullscreen; don't also minimize.
+    // No swipe-to-minimize while in fullscreen (swipes there belong to the system).
     if (document.fullscreenElement || (e.target as Element).closest?.(".vp.fullscreen, .vp.app-fullscreen")) return;
     tracking = true; dy = 0; startY = e.touches[0].clientY; startX = e.touches[0].clientX;
   };
