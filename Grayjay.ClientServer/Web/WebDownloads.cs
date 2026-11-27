@@ -307,12 +307,15 @@ namespace Grayjay.ClientServer.Web
             // The file the phone keeps. Range requests are supported (resuming, and playing it straight from the server).
             // With wait=1 the request is held until the server's download finishes: the phone's background download can be
             // started right away and completes with the app closed. Last-Modified/ETag let a browser resume it with If-Range.
-            app.MapGet("/web/downloads/File", async (string url, int? wait, CancellationToken ct) =>
+            // Proxies time out a request that hasn't answered in a while (Cloudflare after 100 s): after ~80 s it answers with
+            // a redirect to itself instead, which the browser follows, and waits again (up to 20 times, ~25 minutes).
+            app.MapGet("/web/downloads/File", async (HttpContext http, string url, int? wait, int? hop, CancellationToken ct) =>
             {
                 var local = StateDownloads.GetDownloadedVideo(url);
                 if (local == null && wait == 1)
                 {
-                    var until = DateTime.UtcNow.AddHours(3);
+                    var hold = TimeSpan.FromSeconds(int.TryParse(Environment.GetEnvironmentVariable("GRAYJAY_DOWNLOAD_WAIT_SECONDS"), out var sec) && sec > 0 ? sec : 80);
+                    var until = DateTime.UtcNow + hold;
                     int retries = 0;
                     while (local == null && DateTime.UtcNow < until && !ct.IsCancellationRequested)
                     {
@@ -336,6 +339,8 @@ namespace Grayjay.ClientServer.Web
                         try { await Task.Delay(2000, ct); } catch (OperationCanceledException) { break; }
                         local = StateDownloads.GetDownloadedVideo(url);
                     }
+                    if (local == null && Downloading(url) != null && !ct.IsCancellationRequested && (hop ?? 0) < 20)
+                        return Results.Redirect($"/web/downloads/File?url={Uri.EscapeDataString(url)}&wait=1&hop={(hop ?? 0) + 1}");
                 }
                 if (local == null) return Results.NotFound(new { error = "Not downloaded on the server (yet)" });
                 try

@@ -56,6 +56,7 @@ Plain `http://192.168.x.x` works for browsing on the home network but can't be i
 | `GRAYJAY_PUBLIC_URLS` | `--public-url` (repeatable) | Address(es) phones use, comma-separated; shown first in pairing QR codes. **Required in Docker** (the container only sees its own network) and recommended for WireGuard/reverse proxies |
 | `GRAYJAY_PASSWORD` | `--password` | Optional password sign-in in addition to pairing codes |
 | `GRAYJAY_APP_ROOT` | `--app-root` | Built PWA folder (default `./app` next to the binary) |
+| `GRAYJAY_LOG_FILE` | `--log-file` | Also write the console output (startup lines, the first pairing code, warnings) to a file. For running as a background service / scheduled task with no console |
 | `GRAYJAY_NO_AUTH=1` | `--no-auth` | Disables auth. **Only** behind an authenticating proxy |
 | `GRAYJAY_CHROME_PATH` | | Browser used for plugin sign-in |
 | `GRAYJAY_REMOTE_BROWSER_NO_SANDBOX=1` | | Needed when Chromium runs as root or in containers (set in the image) |
@@ -140,7 +141,7 @@ WantedBy=multi-user.target
 | **WireGuard** | Phones reach the server's WireGuard IP (e.g. `10.8.0.1`). Set `GRAYJAY_PUBLIC_URLS=http://10.8.0.1:11338`. Make sure the peer's `AllowedIPs` include the server's tunnel IP and the server's firewall allows 11338 on the `wg0` interface. For HTTPS use the Caddy profile below |
 | **Reverse proxy** (Caddy, nginx, Traefik, Nginx Proxy Manager) | Proxy everything (not just `/app`) to `:11338`, with WebSocket upgrade, no buffering and no read timeout (media + sign-in stream). Pass `Host` through and set `X-Forwarded-Proto: https`. Set `GRAYJAY_PUBLIC_URLS=https://<domain>` |
 | Caddy via compose | `docker compose --profile https up -d` with `GRAYJAY_HOST` set; see `docker/Caddyfile` for real certs (public DNS / DNS-01 for VPN-only boxes) vs `tls internal` (self-signed; trust Caddy's root cert on each phone once) |
-| Cloudflare Tunnel | Works (`cloudflared` → `http://localhost:11338`); keep Grayjay's auth on. Note Cloudflare's ToS on video streaming through tunnels |
+| Cloudflare Tunnel | Works (`cloudflared` → `http://localhost:11338`); keep Grayjay's auth on. Note Cloudflare's ToS on video streaming through tunnels. Cloudflare drops requests that take over 100 s to answer: the background-download request answers with a redirect to itself every 80 s while the server is still downloading |
 
 nginx snippet for the proxy row:
 ```nginx

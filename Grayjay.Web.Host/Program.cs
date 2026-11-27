@@ -19,12 +19,14 @@ namespace Grayjay.Web.Host
     {
         public static async Task<int> Main(string[] args)
         {
-            var opts = ParseOptions(args, out var dataDir, out bool showHelp);
+            var opts = ParseOptions(args, out var dataDir, out bool showHelp, out var logFile);
             if (showHelp)
             {
                 PrintHelp();
                 return 0;
             }
+            if (logFile != null)
+                LogToFile(logFile);
 
             Directories.SetBase(dataDir);
             Console.WriteLine($"Grayjay Web server — data directory: {Directories.Base}");
@@ -142,12 +144,44 @@ namespace Grayjay.Web.Host
             return Path.Combine(appData, "GrayjayWeb");
         }
 
-        private static WebHostOptions ParseOptions(string[] args, out string dataDir, out bool showHelp)
+        /// <summary>
+        /// Copies everything printed (startup lines, the first pairing code, warnings) to a file as well: for running as a
+        /// background service with no console, e.g. a scheduled task whose log a dashboard shows. Kept under ~10 MB.
+        /// </summary>
+        private static void LogToFile(string path)
+        {
+            try
+            {
+                path = Path.GetFullPath(path);
+                Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+                if (File.Exists(path) && new FileInfo(path).Length > 10_000_000)
+                    File.Move(path, path + ".old", true);
+                var file = new StreamWriter(new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete)) { AutoFlush = true };
+                file.WriteLine($"----- {DateTime.Now:yyyy-MM-dd HH:mm:ss} start -----");
+                Console.SetOut(TextWriter.Synchronized(new TeeWriter(Console.Out, file)));
+                Console.SetError(TextWriter.Synchronized(new TeeWriter(Console.Error, file)));
+            }
+            catch (Exception e) { Console.Error.WriteLine($"Can't write the log file {path}: {e.Message}"); }
+        }
+
+        private sealed class TeeWriter : TextWriter
+        {
+            private readonly TextWriter _a, _b;
+            public TeeWriter(TextWriter a, TextWriter b) { _a = a; _b = b; }
+            public override System.Text.Encoding Encoding => System.Text.Encoding.UTF8;
+            public override void Write(char value) { try { _a.Write(value); } catch { } try { _b.Write(value); } catch { } }
+            public override void Write(string? value) { try { _a.Write(value); } catch { } try { _b.Write(value); } catch { } }
+            public override void WriteLine(string? value) { try { _a.WriteLine(value); } catch { } try { _b.WriteLine(value); } catch { } }
+            public override void Flush() { try { _a.Flush(); } catch { } try { _b.Flush(); } catch { } }
+        }
+
+        private static WebHostOptions ParseOptions(string[] args, out string dataDir, out bool showHelp, out string? logFile)
         {
             string? env(string name) => Environment.GetEnvironmentVariable(name) is string v && v.Length > 0 ? v : null;
 
             var opts = new WebHostOptions();
             dataDir = env("GRAYJAY_DATA_DIR") ?? DefaultDataDir();
+            logFile = env("GRAYJAY_LOG_FILE");
             showHelp = false;
 
             if (env("GRAYJAY_PORT") is string p && int.TryParse(p, out var port)) opts.Port = port;
@@ -171,6 +205,7 @@ namespace Grayjay.Web.Host
                     case "--password": opts.Password = next(); break;
                     case "--no-auth": opts.DisableAuth = true; break;
                     case "--public-url": opts.PublicUrls.Add(next()); break;
+                    case "--log-file": logFile = next(); break;
                     case "-h":
                     case "--help": showHelp = true; break;
                     default: Console.WriteLine($"Ignoring unknown argument {args[i]}"); break;
@@ -203,6 +238,7 @@ namespace Grayjay.Web.Host
                   --app-root <dir>   Built PWA directory (default ./app, env GRAYJAY_APP_ROOT)
                   --password <pw>    Allow password sign-in in addition to pairing (env GRAYJAY_PASSWORD)
                   --public-url <url> Address phones use to reach this server; repeatable (env GRAYJAY_PUBLIC_URLS, comma-separated)
+                  --log-file <path>  Also write what's printed (incl. the first pairing code) to this file (env GRAYJAY_LOG_FILE)
                   --no-auth          Disable authentication (only behind an authenticating reverse proxy)
 
                 Env GRAYJAY_LOCAL_SECRET: secret the tray app uses to sign in on this computer via /auth/Local.
