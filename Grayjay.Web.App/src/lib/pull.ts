@@ -15,6 +15,10 @@ export function usePullToRefresh(refresh: () => Promise<unknown> | void) {
     const max = 90;
     const onStart = (e: TouchEvent) => {
       if (busy || scrollY > 0 || e.touches.length !== 1 || document.documentElement.style.overflow === "hidden") return;
+      // Only pulls that start on the page itself: dragging the mini-player (or anything in the player, a sheet or a
+      // dialog) down isn't a pull to refresh.
+      const target = e.target instanceof Element ? e.target : null;
+      if (target?.closest(".watch, dialog, [data-no-pull]")) return;
       startY = e.touches[0].clientY; pulling = true; dist = 0;
     };
     const onMove = (e: TouchEvent) => {
