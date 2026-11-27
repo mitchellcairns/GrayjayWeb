@@ -96,7 +96,8 @@ export const auth = {
 
 // ---------- Feeds ----------
 export const home = {
-  loadLazy: () => get<PagerResult<Content>>("/home/HomeLoadLazy?initialPageSize=24"),
+  /** pluginId: only that source's home feed ([GrayjayWeb] source filter). */
+  loadLazy: (pluginId?: string | null) => get<PagerResult<Content>>(`/home/HomeLoadLazy?initialPageSize=24${pluginId ? `&pluginId=${q(pluginId)}` : ""}`),
   next: () => get<PagerResult<Content>>("/home/HomeNextPage"),
 };
 

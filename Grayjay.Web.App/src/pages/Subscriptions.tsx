@@ -10,6 +10,7 @@ import Icon from "../components/Icon";
 import Sheet from "../components/Sheet";
 import { Avatar } from "../components/ContentCard";
 import GroupManager from "../components/GroupManager";
+import SourceChips, { createSourceFilter } from "../components/SourceFilter";
 import PageHeader from "../shell/PageHeader";
 import "./Subscriptions.css";
 
@@ -22,6 +23,12 @@ export default function Subscriptions() {
   const [channelsOpen, setChannelsOpen] = createSignal(false);
   const [groupsOpen, setGroupsOpen] = createSignal(false);
   const [progress, setProgress] = createSignal<{ progress: number; total: number } | null>(null);
+  // Filtered here: the feed merges every subscription, so this just hides other sources' videos.
+  const filter = createSourceFilter("subscriptions");
+  const subSources = createMemo(() => {
+    const ids = new Set((subs() ?? []).map((s) => s.channel.id?.pluginID).filter(Boolean));
+    return (filter.enabled() ?? []).filter((c) => ids.has(c.id));
+  });
 
   // Like the desktop app: show the cached feed instantly, and switch to the live feed once the server has refreshed it.
   const cache = createPager(subscriptions.cacheLoad, subscriptions.cacheNext);
@@ -77,7 +84,12 @@ export default function Subscriptions() {
             </button>
           </div>
         </Show>
-        <Show when={subs.state === "ready" && subs()!.length === 0} fallback={<Feed pager={pager()} />}>
+        <Show when={subs.state === "ready" && subs()!.length === 0} fallback={<>
+          <SourceChips sources={subSources()} selected={filter.selected()} onPick={(id) => { filter.set(id); scrollTo({ top: 0 }); }} />
+          <Feed pager={pager()} match={filter.matches} empty={filter.selected()
+            ? <div class="empty"><Icon name="subs" /><h3>Nothing new from {subSources().find((c) => c.id === filter.selected())?.name ?? "this source"}</h3><p>Pull down to refresh, or pick All sources.</p></div>
+            : undefined} />
+        </>}>
           <div class="empty">
             <Icon name="subs" />
             <h3>No subscriptions yet</h3>

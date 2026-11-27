@@ -376,10 +376,11 @@ namespace Grayjay.Desktop.POC.Port.States
             pager.Initialize();
             return pager;
         }
-        public static IPager<PlatformContent> GetHomeLazy(Func<PlatformContent, PlatformContent> modifier = null, Func<int> requiredSize = null)
+        // [GrayjayWeb] onlyPluginId: the app's source filter (Discover for one platform).
+        public static IPager<PlatformContent> GetHomeLazy(Func<PlatformContent, PlatformContent> modifier = null, Func<int> requiredSize = null, string? onlyPluginId = null)
         {
             return CreateDistributedLazyPager(
-                (client) => client.Descriptor.AppSettings.TabEnabled.EnableHome,
+                (client) => client.Descriptor.AppSettings.TabEnabled.EnableHome && (string.IsNullOrEmpty(onlyPluginId) || client.ID == onlyPluginId),
                 (client) => {
                     try
                     {

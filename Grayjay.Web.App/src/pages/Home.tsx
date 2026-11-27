@@ -1,20 +1,20 @@
-import { Show, createResource, onCleanup, onMount } from "solid-js";
+import { Show, createEffect, on } from "solid-js";
 import { A } from "@solidjs/router";
-import { home, sources } from "../api";
-import { on } from "../api/socket";
+import { home } from "../api";
 import { createPager } from "../lib/pager";
 import Feed from "../components/Feed";
+import SourceChips, { createSourceFilter } from "../components/SourceFilter";
 import Icon from "../components/Icon";
 import PageHeader from "../shell/PageHeader";
 import { usePullToRefresh } from "../lib/pull";
 
 export default function Home() {
-  const [enabled, { refetch }] = createResource(() => sources.enabled().catch(() => []));
-  const pager = createPager(home.loadLazy, home.next, { eagerSecondPage: true });
+  const filter = createSourceFilter("home");
+  const enabled = filter.enabled;
+  const pager = createPager(() => home.loadLazy(filter.selected()), home.next, { eagerSecondPage: true });
 
-  onMount(() => pager.reload());
-  const off = on("EnabledClientsChanged", () => { refetch(); pager.reload(); });
-  onCleanup(off);
+  // Load once the enabled sources are known (so a remembered source filter applies), and again when they or the filter change.
+  createEffect(on(() => [enabled.state === "ready", filter.selected()] as const, ([ready]) => { if (ready) pager.reload(); }));
   usePullToRefresh(() => pager.reload());
 
   return (
@@ -25,7 +25,10 @@ export default function Home() {
       </>} />
       <main class="page">
         <Show when={enabled.state === "ready" && enabled()!.length === 0} fallback={
-          <Feed pager={pager} empty={<div class="empty"><Icon name="discover" /><h3>Nothing to discover yet</h3><p>Pull down to refresh, or check your sources.</p></div>} />
+          <>
+            <SourceChips sources={enabled() ?? []} selected={filter.selected()} onPick={filter.set} />
+            <Feed pager={pager} empty={<div class="empty"><Icon name="discover" /><h3>Nothing to discover yet</h3><p>Pull down to refresh, or check your sources.</p></div>} />
+          </>
         }>
           <div class="empty">
             <img src="/app/logo.svg" alt="" width="64" height="64" />

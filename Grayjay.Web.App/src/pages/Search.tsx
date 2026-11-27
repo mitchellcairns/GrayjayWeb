@@ -9,6 +9,7 @@ import Icon from "../components/Icon";
 import Sheet from "../components/Sheet";
 import { toastError } from "../components/Toasts";
 import PageHeader from "../shell/PageHeader";
+import SourceChips from "../components/SourceFilter";
 import { iconOf } from "./Sources";
 import "./Search.css";
 
@@ -118,6 +119,9 @@ export default function Search() {
       return out;
     });
   };
+  // The quick row above the results: one source, or all of them (the sheet can pick any mix).
+  const onlySource = () => (excluded().length > 0 && includedSources().length === 1 ? includedSources()[0].id : null);
+  const pickSource = (id: string | null) => { setExcluded(id ? (caps() ?? []).map((c) => c.id).filter((x) => x !== id) : []); rerun(); };
   const toggleSource = (id: string) => setExcluded((x) => (x.includes(id) ? x.filter((y) => y !== id) : [...x, id]));
   const resetFilters = () => { setOrder(null); setFilters({}); setExcluded([]); };
   const filterName = (gid: string, key: string) => allFilters().find((g) => g.id === gid)?.filters.find((f) => filterKey(f) === key)?.name ?? key;
@@ -170,6 +174,7 @@ export default function Search() {
                 </For>
               </Show>
             </div>
+            <SourceChips sources={(caps() ?? []).map((c) => c.config)} selected={onlySource()} allPressed={excluded().length === 0} onPick={pickSource} />
             <Feed pager={pager} empty={<div class="empty"><Icon name="search" /><h3>No results</h3><p>Try different words or filters, or enable more sources.</p></div>} />
           </>
         }>

@@ -14,11 +14,13 @@ export default function Feed(props: {
   hideAuthor?: boolean;
   /** Show creators you've hidden (a channel's own page). */
   allowHidden?: boolean;
+  /** [GrayjayWeb] Only show items this accepts (the source filter). */
+  match?: (item: Content) => boolean;
 }) {
   let sentinel!: HTMLDivElement;
   const layout = () => props.layout ?? (display.density() === "list" ? "list" : "grid");
   const gridClass = () => (layout() === "grid" ? `feed-grid ${display.density() === "large" ? "large" : "compact"}` : "feed-list");
-  const items = createMemo(() => (props.allowHidden ? props.pager.items() : props.pager.items().filter((i) => !hidden.isHidden(i.author))));
+  const items = createMemo(() => props.pager.items().filter((i) => (props.allowHidden || !hidden.isHidden(i.author)) && (!props.match || props.match(i))));
 
   createEffect(() => {
     const io = new IntersectionObserver((entries) => {

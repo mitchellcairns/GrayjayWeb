@@ -33,12 +33,12 @@ namespace Grayjay.ClientServer.Controllers
         }
         
         [HttpGet]
-        public async Task<PagerResult<PlatformContent>> HomeLoadLazy(int initialPageSize)
+        public async Task<PagerResult<PlatformContent>> HomeLoadLazy(int initialPageSize, string? pluginId = null /* [GrayjayWeb] source filter */)
         {
             await StatePlatform.WaitForStartup();
             var state = this.State();
             state.HomeState.InitialPageSize = initialPageSize;
-            var home = StatePlatform.GetHomeLazy((x)=>(x is PlatformVideo vx) ? StateHistory.AddVideoMetadata(vx) : x, ()=>state.HomeState.InitialPageSize);
+            var home = StatePlatform.GetHomeLazy((x)=>(x is PlatformVideo vx) ? StateHistory.AddVideoMetadata(vx) : x, ()=>state.HomeState.InitialPageSize, pluginId);
             state.HomeState.HomePager = home;
             return home.AsPagerResult();
         }

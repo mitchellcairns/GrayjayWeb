@@ -11,8 +11,6 @@
 
 .search-chips { margin-bottom: 16px; align-items: center; }
 .chip-divider { width: 1px; height: 22px; background: var(--line); flex: none; }
-.chip { display: inline-flex; align-items: center; gap: 6px; }
 .chip.removable { background: color-mix(in srgb, var(--accent) 18%, var(--bg-elev-2)); }
 .search-filters .filter-title { font-weight: 700; margin-bottom: 8px; }
 .chip-wrap { display: flex; flex-wrap: wrap; gap: 8px; }
-.source-chip img { width: 16px; height: 16px; border-radius: 4px; object-fit: contain; }
