@@ -98,8 +98,10 @@ namespace Grayjay.Web.Host
             Console.WriteLine($"  Open:  http://localhost:{opts.Port}{WebHostOptions.AppPath}/");
             foreach (var url in opts.PublicUrls)
                 Console.WriteLine($"         {url.TrimEnd('/')}{WebHostOptions.AppPath}/");
-            foreach (var ip in GetLanAddresses())
-                Console.WriteLine($"         http://{ip}:{opts.Port}{WebHostOptions.AppPath}/");
+            // Listening on loopback only (behind a tunnel or reverse proxy): LAN addresses wouldn't answer.
+            if (!IPAddress.IsLoopback(opts.ListenAddress))
+                foreach (var ip in GetLanAddresses())
+                    Console.WriteLine($"         http://{ip}:{opts.Port}{WebHostOptions.AppPath}/");
 
             if (opts.DisableAuth)
             {
