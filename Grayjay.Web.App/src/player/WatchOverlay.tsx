@@ -190,10 +190,15 @@ export default function WatchOverlay() {
     if (mode() !== "full" || e.touches.length !== 1) return;
     // No swipe-to-minimize while in fullscreen (swipes there belong to the system).
     if (document.fullscreenElement || (e.target as Element).closest?.(".vp.fullscreen, .vp.app-fullscreen")) return;
+    // Only drags that start on the picture itself: the seek bar (and its cancel zone), the control rows and menus have
+    // their own drags, and a seek drifting downwards isn't a pull-down.
+    if ((e.target as Element).closest?.(".vp-bar, .vp-bottom, .vp-top, .vp-menu, .vp-scrub-cancel, button, input")) return;
     tracking = true; dy = 0; startY = e.touches[0].clientY; startX = e.touches[0].clientX;
   };
   const onTouchMove = (e: TouchEvent) => {
     if (!tracking) return;
+    // A seek started after all (e.g. a long press on the bar area): let it be.
+    if (playerBoxEl?.querySelector(".vp-bar.scrubbing")) { tracking = false; panel.style.transition = ""; panel.style.transform = ""; panel.style.opacity = ""; return; }
     const ddy = e.touches[0].clientY - startY, ddx = e.touches[0].clientX - startX;
     if (Math.abs(ddx) > Math.abs(ddy) && Math.abs(ddx) > 12) { tracking = false; return; }
     dy = Math.max(0, ddy);
