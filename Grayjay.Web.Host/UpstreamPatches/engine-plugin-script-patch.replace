@@ -1,0 +1,3 @@
+            // [GrayjayWeb] Fixes to official plugins, applied after the signature check above (see Grayjay.ClientServer/Web/WebPluginPatches.cs).
+            _engine.Execute(AppDomain.CurrentDomain.GetData("GrayjayWeb.PluginScriptPatch") is Func<string, string, string> gjwPatch ? gjwPatch(Config.ID, _script) : _script);
+            if (_options.IncludeStandardTests)

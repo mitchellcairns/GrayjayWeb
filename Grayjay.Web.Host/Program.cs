@@ -1,4 +1,4 @@
-// [GrayjayWeb] Headless entry point: runs the Grayjay engine and API as the backend of the Grayjay PWA.
+﻿// [GrayjayWeb] Headless entry point: runs the Grayjay engine and API as the backend of the Grayjay PWA.
 // Modified from Grayjay.Desktop.CEF/Program.cs (Copyright FUTO Holdings, Inc., Source First License 1.1).
 using System.Net;
 using System.Net.NetworkInformation;
@@ -40,6 +40,8 @@ namespace Grayjay.Web.Host
             FUTO.MDNS.Logger.WillLog = (level) => Logger.WillLog((LogLevel)level);
 
             GrayjayDevSettings.Instance.DeveloperMode = File.Exists(Path.Combine(Directories.Base, "DEV"));
+            // Fixes to official plugins FUTO hasn't shipped yet; must be in place before any plugin starts.
+            Grayjay.ClientServer.Web.WebPluginPatches.Install();
 
             // Plugin sign-in and captchas run in a server-side Chromium streamed to the PWA (remote login browser).
             WebWindowProvider.InterceptorFactory = (title, url, userAgent, mobile, injectJs, handler, ct) =>

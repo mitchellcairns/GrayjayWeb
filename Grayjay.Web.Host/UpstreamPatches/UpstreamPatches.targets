@@ -14,6 +14,10 @@
       <Find>$(MSBuildThisFileDirectory)engine-dedup-null-plugin.find</Find>
       <Replace>$(MSBuildThisFileDirectory)engine-dedup-null-plugin.replace</Replace>
     </UpstreamPatch>
+    <UpstreamPatch Include="$(MSBuildThisFileDirectory)../../Grayjay.Engine/Grayjay.Engine/GrayjayPlugin.cs">
+      <Find>$(MSBuildThisFileDirectory)engine-plugin-script-patch.find</Find>
+      <Replace>$(MSBuildThisFileDirectory)engine-plugin-script-patch.replace</Replace>
+    </UpstreamPatch>
   </ItemGroup>
 
   <UsingTask TaskName="GrayjayApplyUpstreamPatches" TaskFactory="RoslynCodeTaskFactory" AssemblyFile="$(MSBuildToolsPath)\Microsoft.Build.Tasks.Core.dll">

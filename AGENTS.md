@@ -221,6 +221,9 @@ Conventions:
   `Grayjay.Web.Host/UpstreamPatches/` as exact find/replace pairs, applied to the submodule checkout before it compiles in
   every build (dotnet run, build-web.ps1, Docker). A build warning means upstream changed that code: check whether the
   patch is still needed and remove it if FUTO fixed it. A patched submodule shows as modified in `git status`; that's expected.
+- Official plugin scripts (Twitch, YouTube, …) are downloaded from FUTO, so fixes to them live in
+  `Grayjay.ClientServer/Web/WebPluginPatches.cs` (exact find/replace per plugin ID), applied each time a plugin starts, after
+  the engine has checked the original script's signature. The server logs whether each patch applied or no longer matches.
 - All media URLs must be same-origin and relative in web mode (`BaseUrl` is `""`; proxy entries are `/hp/{id}`).
 - Every non-public route is behind `WebAuthMiddleware`; add new public paths to `WebAuth.IsPublicPath` only deliberately.
 - Plain-HTTP LAN origins are not secure contexts: don't use `crypto.randomUUID`, Clipboard, etc. without fallbacks.

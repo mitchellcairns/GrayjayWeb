@@ -1,0 +1,2 @@
+            _engine.Execute(_script);
+            if (_options.IncludeStandardTests)
