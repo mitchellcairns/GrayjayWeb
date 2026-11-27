@@ -148,6 +148,9 @@ input, select, textarea { font-size: 16px; }
 .chip { display: inline-flex; align-items: center; gap: 6px; }
 .source-chip img { width: 16px; height: 16px; border-radius: 4px; object-fit: contain; }
 .source-chips { margin-bottom: 14px; }
+.live-dot { width: 8px; height: 8px; border-radius: 50%; background: #e53935; flex: none; }
+.live-chip[aria-pressed="true"] .live-dot { animation: live-pulse 1.6s ease-in-out infinite; }
+@keyframes live-pulse { 50% { opacity: 0.35; } }
 
 /* ---------- Layout ---------- */
 .page {

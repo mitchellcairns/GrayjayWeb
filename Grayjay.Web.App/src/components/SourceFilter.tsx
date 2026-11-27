@@ -1,4 +1,4 @@
-import { For, Show, createResource, onCleanup } from "solid-js";
+import { For, JSX, Show, createResource, onCleanup } from "solid-js";
 import { Content, SourceConfig, sources } from "../api";
 import { on } from "../api/socket";
 import { stored } from "../lib/stored";
@@ -32,13 +32,18 @@ export default function SourceChips(props: {
   onPick: (id: string | null) => void;
   /** Highlight "All" (defaults to nothing selected). */
   allPressed?: boolean;
+  /** Extra chips before the sources (e.g. "Live"); the row then shows even with one source. */
+  leading?: JSX.Element;
   class?: string;
 }) {
   return (
-    <Show when={props.sources.length > 1}>
+    <Show when={props.sources.length > 1 || props.leading}>
       <div class={`chips source-chips ${props.class ?? ""}`} role="toolbar" aria-label="Show sources">
-        <button class="chip" aria-pressed={props.allPressed ?? props.selected === null} onClick={() => props.onPick(null)}>All sources</button>
-        <For each={props.sources}>
+        {props.leading}
+        <Show when={props.sources.length > 1}>
+          <button class="chip" aria-pressed={props.allPressed ?? props.selected === null} onClick={() => props.onPick(null)}>All sources</button>
+        </Show>
+        <For each={props.sources.length > 1 ? props.sources : []}>
           {(c) => (
             <button class="chip source-chip" aria-pressed={props.selected === c.id} onClick={() => props.onPick(props.selected === c.id ? null : c.id)}>
               <Show when={iconOf(c)}><img src={iconOf(c)} alt="" referrerpolicy="no-referrer" /></Show>{c.name}

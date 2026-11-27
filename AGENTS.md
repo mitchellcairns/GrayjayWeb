@@ -164,7 +164,8 @@ location / {
 1. Pair the first device (code from logs / tray opens it), then **Add to Home Screen** (HTTPS) on phones.
 2. The first-run setup offers: **Grayjay Sync** (Grayjay Android/Desktop → Settings → Sync → Link new device → scan),
    **Grayjay backup .zip** import (Android *Export*), **YouTube Takeout `subscriptions.csv` / NewPipe `.json`** import,
-   source selection, and sign-in. Reopen later from Settings → *Import & sync*.
+   source selection, and sign-in, plus *Subscribe to who you follow on …* for sources that can list an account's follows
+   (Twitch, YouTube; signs in first if needed). Reopen later from Settings → *Import & sync*.
 3. YouTube extras (SponsorBlock, Return YouTube Dislike, DeArrow): Sources → YouTube → Settings.
 4. **Downloads / offline:** ⋮ → *Download* (or *Download* on the watch page), pick a quality. The server downloads it into
    `<data dir>/downloads` (Grayjay's own downloader, H.264/AAC preferred so iPhones can play it), joins video + audio

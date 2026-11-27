@@ -103,7 +103,7 @@ export default function Settings() {
         <div class="list">
           <A class="list-item" href="/sources"><Icon name="sources" /><div class="grow"><div class="title">Sources</div><div class="sub">Add platforms, sign in, enable or disable</div></div><Icon name="forward" size={18} /></A>
           <A class="list-item" href="/library"><Icon name="history" /><div class="grow"><div class="title">Watch history</div></div><Icon name="forward" size={18} /></A>
-          <A class="list-item" href="/setup"><Icon name="refresh" /><div class="grow"><div class="title">Import & sync</div><div class="sub">Grayjay Sync, Grayjay backups, YouTube/NewPipe subscriptions</div></div><Icon name="forward" size={18} /></A>
+          <A class="list-item" href="/setup"><Icon name="refresh" /><div class="grow"><div class="title">Import & sync</div><div class="sub">Grayjay Sync, Grayjay backups, YouTube/NewPipe subscriptions, who you follow on Twitch or YouTube</div></div><Icon name="forward" size={18} /></A>
           <a class="list-item" href="/web/export/Backup" download=""><Icon name="download" /><div class="grow"><div class="title">Download a backup</div><div class="sub">Subscriptions, playlists and sources as a Grayjay .zip</div></div></a>
         </div>
 

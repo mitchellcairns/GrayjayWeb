@@ -2,7 +2,8 @@ import { For, Show, createMemo, createResource, createSignal, onCleanup, onMount
 import { A } from "@solidjs/router";
 import { Content, ContentType, subscriptions } from "../api";
 import { on } from "../api/socket";
-import { createPager } from "../lib/pager";
+import { Pager, createPager } from "../lib/pager";
+import { toDate } from "../lib/format";
 import { usePullToRefresh } from "../lib/pull";
 import { channelHref } from "../lib/nav";
 import Feed from "../components/Feed";
@@ -37,7 +38,26 @@ export default function Subscriptions() {
     () => (group() ? subscriptions.groupNext(group()!) : subscriptions.next()),
   );
   const liveReady = () => group() !== null || live.updated() || (live.loaded() && live.items().some(isReal));
-  const pager = createMemo(() => (liveReady() ? live : cache));
+  // "Live": channels streaming right now. Uses the refreshed feed only (the cache can still say "live" for a stream
+  // that has ended). Live items sit near the top (YouTube dates them now, Twitch by when the stream started), so stop
+  // paging once the feed is two days old.
+  const [liveOnly, setLiveOnly] = createSignal(false);
+  const twoDaysOld = (items: Content[]) => {
+    for (let i = items.length - 1; i >= 0; i--) {
+      const d = toDate(items[i].dateTime);
+      if (d) return Date.now() - d.getTime() > 2 * 86400_000;
+    }
+    return false;
+  };
+  // Also hold paging until the refreshed feed has arrived (before that it's a page of dateless placeholders).
+  const liveDone = () => !liveReady() || twoDaysOld(live.items());
+  const liveFeed: Pager<Content> = {
+    ...live,
+    hasMore: () => live.hasMore() && !liveDone(),
+    next: () => (liveDone() ? Promise.resolve() : live.next()),
+  };
+  const pager = createMemo(() => (liveOnly() ? liveFeed : liveReady() ? live : cache));
+  const match = (c: Content) => filter.matches(c) && (!liveOnly() || !!c.isLive);
 
   const refresh = (updated = false) => {
     if (!group()) cache.reload();
@@ -85,9 +105,12 @@ export default function Subscriptions() {
           </div>
         </Show>
         <Show when={subs.state === "ready" && subs()!.length === 0} fallback={<>
-          <SourceChips sources={subSources()} selected={filter.selected()} onPick={(id) => { filter.set(id); scrollTo({ top: 0 }); }} />
-          <Feed pager={pager()} match={filter.matches} empty={filter.selected()
-            ? <div class="empty"><Icon name="subs" /><h3>Nothing new from {subSources().find((c) => c.id === filter.selected())?.name ?? "this source"}</h3><p>Pull down to refresh, or pick All sources.</p></div>
+          <SourceChips sources={subSources()} selected={filter.selected()} onPick={(id) => { filter.set(id); scrollTo({ top: 0 }); }}
+            leading={<button class="chip live-chip" aria-pressed={liveOnly()} onClick={() => { setLiveOnly(!liveOnly()); scrollTo({ top: 0 }); }}><span class="live-dot" />Live</button>} />
+          <Feed pager={pager()} match={match} empty={
+            liveOnly() && !liveReady() ? <div class="feed-status"><div class="spinner" /><div>Checking who's live…</div></div>
+            : liveOnly() ? <div class="empty"><Icon name="subs" /><h3>No one's live right now</h3><p>None of your channels{filter.selected() ? ` on ${subSources().find((c) => c.id === filter.selected())?.name ?? "this source"}` : ""} are streaming. Pull down to check again.</p></div>
+            : filter.selected() ? <div class="empty"><Icon name="subs" /><h3>Nothing new from {subSources().find((c) => c.id === filter.selected())?.name ?? "this source"}</h3><p>Pull down to refresh, or pick All sources.</p></div>
             : undefined} />
         </>}>
           <div class="empty">

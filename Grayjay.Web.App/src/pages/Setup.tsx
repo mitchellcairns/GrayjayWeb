@@ -121,6 +121,22 @@ function BringData(props: { onChanged: () => void }) {
   const [devices, { refetch: refetchDevices }] = createResource(() => sync.devices().catch(() => []));
   const [busy, setBusy] = createSignal<string | null>(null);
   let backupInput!: HTMLInputElement, subsInput!: HTMLInputElement;
+  // Sources that can list who you follow there once you're signed in (Twitch, YouTube…).
+  const [accounts, { refetch: refetchAccounts }] = createResource(async () =>
+    (await sources.states().catch(() => [] as any[]))
+      .filter((s: any) => s.capabilities?.hasGetUserSubscriptions)
+      .map((s: any) => ({ config: s.config as SourceConfig, signedIn: !!s.hasLoggedIn })));
+  const importFollows = async (c: SourceConfig, signedIn: boolean) => {
+    setBusy(`follows:${c.id}`);
+    try {
+      if (!signedIn && !(await signInAndWait(c.id))) { toast("Sign-in wasn't completed", "error"); return; }
+      const urls = await setup.userSubscriptions(c.id);
+      if (!urls.length) { toast(`You don't follow any channels on ${c.name}`); return; }
+      await setup.importSubscriptionUrls(urls);
+      toast(`Looking up ${urls.length} channels from ${c.name}…`);
+    } catch (e) { toastError(e); }
+    finally { setBusy(null); refetchAccounts(); }
+  };
 
   const startSync = async () => {
     setMode("sync");
@@ -211,6 +227,21 @@ function BringData(props: { onChanged: () => void }) {
         <Show when={busy() === "subs"}><div class="spinner" style={{ width: "20px", height: "20px", "border-width": "2px" }} /></Show>
       </button>
       <input ref={subsInput} type="file" accept=".csv,.json,.txt,text/csv,application/json,text/plain" hidden onChange={(e) => onSubscriptions(e.currentTarget.files?.[0])} />
+
+      <For each={accounts()}>
+        {(a) => (
+          <button class="setup-option-head setup-option" onClick={() => importFollows(a.config, a.signedIn)} disabled={busy() === `follows:${a.config.id}`}>
+            <div class="setup-icon"><Show when={iconOf(a.config)} fallback={<Icon name="users" />}><img src={iconOf(a.config)} alt="" width="24" height="24" referrerpolicy="no-referrer" /></Show></div>
+            <div class="grow">
+              <div class="title">Subscribe to who you follow on {a.config.name}</div>
+              <div class="sub">{a.signedIn
+                ? `Reads the channels your ${a.config.name} account follows; you pick which to add.`
+                : `Sign in to ${a.config.name} first (opens the sign-in screen), then pick which channels to add.`}</div>
+            </div>
+            <Show when={busy() === `follows:${a.config.id}`}><div class="spinner" style={{ width: "20px", height: "20px", "border-width": "2px" }} /></Show>
+          </button>
+        )}
+      </For>
     </div>
   );
 }

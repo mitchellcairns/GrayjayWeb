@@ -227,6 +227,8 @@ export const setup = {
   importNewPipe: (file: Blob) => upload<{ ok: boolean; count: number }>("/web/import/NewPipe", file),
   /** Channel URLs (e.g. parsed from a YouTube Takeout subscriptions.csv). Continues in the "importSubs" dialog. */
   importSubscriptionUrls: (urls: string[]) => post<boolean>("/Import/ImportSubscriptions", urls),
+  /** Channels you follow on a signed-in source (Twitch follows, YouTube subscriptions), as channel URLs. */
+  userSubscriptions: (pluginId: string) => get<string[]>(`/Import/GetUserSubscriptions?id=${q(pluginId)}`),
 };
 
 export interface SyncDevice { publicKey: string; displayName?: string; metadata?: string; linkType?: number }
