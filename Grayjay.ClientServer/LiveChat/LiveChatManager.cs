@@ -103,6 +103,7 @@ public class LiveChatManager
 
     private void PollLoop()
     {
+        int consecutiveFailures = 0; // [GrayjayWeb]
         try
         {
             while (_running && _pager != null && _pager.HasMorePages())
@@ -158,14 +159,27 @@ public class LiveChatManager
                     }
                     else
                         Logger.Info<LiveChatManager>("No new Live Events");
+                    consecutiveFailures = 0;
                 }
                 catch (OperationCanceledException)
                 {
                     break;
                 }
+                // [GrayjayWeb] The source behind this chat is gone (plugin reloaded, video closed): stop instead of failing
+                // every second forever.
+                catch (ObjectDisposedException)
+                {
+                    Logger.Warning<LiveChatManager>("Live chat source was disposed; stopping live events");
+                    break;
+                }
                 catch (Exception ex)
                 {
                     Logger.Error<LiveChatManager>("Failed to load live events", ex); 
+                    if (++consecutiveFailures >= 20)
+                    {
+                        Logger.Warning<LiveChatManager>("Live events failed 20 times in a row; stopping");
+                        break;
+                    }
                 }
 
                 var slept = 0;
