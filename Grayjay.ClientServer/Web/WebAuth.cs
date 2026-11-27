@@ -215,7 +215,23 @@ namespace Grayjay.ClientServer.Web
             lock (list)
                 list.Add(DateTime.UtcNow);
         }
-        private static string ClientKey(HttpContext ctx) => ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+        /// <summary>
+        /// Who is trying, for the wrong-code lockout. Behind a tunnel or reverse proxy on this machine (Cloudflare Tunnel,
+        /// Caddy, nginx) every request comes from 127.0.0.1, so one person's mistakes would lock everyone out (and an
+        /// attacker would share the real user's limit): use the visitor's address the proxy passes on. Only trusted from
+        /// loopback, so a client on the network can't pick its own.
+        /// </summary>
+        private static string ClientKey(HttpContext ctx)
+        {
+            var remote = ctx.Connection.RemoteIpAddress;
+            if (remote != null && IPAddress.IsLoopback(remote))
+            {
+                var forwarded = ctx.Request.Headers["CF-Connecting-IP"].FirstOrDefault()
+                    ?? ctx.Request.Headers["X-Forwarded-For"].FirstOrDefault()?.Split(',')[0].Trim();
+                if (!string.IsNullOrEmpty(forwarded)) return "via-proxy:" + forwarded;
+            }
+            return remote?.ToString() ?? "unknown";
+        }
         #endregion
 
         #region HTTP

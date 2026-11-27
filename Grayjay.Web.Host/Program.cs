@@ -109,7 +109,7 @@ namespace Grayjay.Web.Host
                 Console.WriteLine("  Authentication is DISABLED (--no-auth). Anyone who can reach this port controls this server.");
                 Console.ResetColor();
             }
-            else if (server.WebAuth != null && server.WebAuth.GetDevices().Count == 0 && opts.LocalSecret == null)
+            else if (server.WebAuth != null && server.WebAuth.GetDevices().Count == 0 && (opts.LocalSecret == null || _secretFromFile))
             {
                 // Standalone (no tray app): print a code so the very first device can pair.
                 var (code, _) = server.WebAuth.CreatePairingCode("console");
@@ -177,6 +177,23 @@ namespace Grayjay.Web.Host
             public override void Flush() { try { _a.Flush(); } catch { } try { _b.Flush(); } catch { } }
         }
 
+        /// <summary>
+        /// The secret that signs a browser on this computer in without pairing (GET /auth/Local?secret=…), kept in a file
+        /// so a shortcut on the server can use it, like the tray app does. Created on first start.
+        /// </summary>
+        private static bool _secretFromFile;
+
+        private static string LoadOrCreateSecret(string path)
+        {
+            path = Path.GetFullPath(path);
+            if (File.Exists(path) && File.ReadAllText(path).Trim() is string existing && existing.Length >= 32)
+                return existing;
+            var secret = Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(24)).ToLowerInvariant();
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            File.WriteAllText(path, secret);
+            return secret;
+        }
+
         private static WebHostOptions ParseOptions(string[] args, out string dataDir, out bool showHelp, out string? logFile)
         {
             string? env(string name) => Environment.GetEnvironmentVariable(name) is string v && v.Length > 0 ? v : null;
@@ -184,6 +201,7 @@ namespace Grayjay.Web.Host
             var opts = new WebHostOptions();
             dataDir = env("GRAYJAY_DATA_DIR") ?? DefaultDataDir();
             logFile = env("GRAYJAY_LOG_FILE");
+            string? localSecretFile = env("GRAYJAY_LOCAL_SECRET_FILE");
             showHelp = false;
 
             if (env("GRAYJAY_PORT") is string p && int.TryParse(p, out var port)) opts.Port = port;
@@ -208,12 +226,18 @@ namespace Grayjay.Web.Host
                     case "--no-auth": opts.DisableAuth = true; break;
                     case "--public-url": opts.PublicUrls.Add(next()); break;
                     case "--log-file": logFile = next(); break;
+                    case "--local-secret-file": localSecretFile = next(); break;
                     case "-h":
                     case "--help": showHelp = true; break;
                     default: Console.WriteLine($"Ignoring unknown argument {args[i]}"); break;
                 }
             }
 
+            if (opts.LocalSecret == null && localSecretFile != null)
+            {
+                opts.LocalSecret = LoadOrCreateSecret(localSecretFile);
+                _secretFromFile = true; // a service with shortcuts, not the tray: still print the first pairing code
+            }
             opts.AppRoot ??= FindAppRoot();
             return opts;
         }
@@ -241,6 +265,8 @@ namespace Grayjay.Web.Host
                   --password <pw>    Allow password sign-in in addition to pairing (env GRAYJAY_PASSWORD)
                   --public-url <url> Address phones use to reach this server; repeatable (env GRAYJAY_PUBLIC_URLS, comma-separated)
                   --log-file <path>  Also write what's printed (incl. the first pairing code) to this file (env GRAYJAY_LOG_FILE)
+                  --local-secret-file <path>  Secret for signing in a browser on this computer without pairing, as the tray
+                                     does (GET /auth/Local?secret=...); created if missing (env GRAYJAY_LOCAL_SECRET_FILE)
                   --no-auth          Disable authentication (only behind an authenticating reverse proxy)
 
                 Env GRAYJAY_LOCAL_SECRET: secret the tray app uses to sign in on this computer via /auth/Local.

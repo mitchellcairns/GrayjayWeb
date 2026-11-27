@@ -63,6 +63,7 @@ Plain `http://192.168.x.x` works for browsing on the home network but can't be i
 | `GRAYJAY_REMOTE_BROWSER_PROFILE_DIR` | | Temp profile location (e.g. if snap Chromium can't use `/tmp`) |
 | `GRAYJAY_REMOTE_BROWSER_HEADFUL=1` | | Debug: show the sign-in browser as a real window on the server |
 | `GRAYJAY_LOCAL_SECRET` | | Set by the tray app; lets the host machine sign in without pairing. Don't set by hand |
+| `GRAYJAY_LOCAL_SECRET_FILE` | `--local-secret-file` | Same, for a server run as a service: the secret is kept in (or created in) this file so a shortcut on that machine can open `/auth/Local?secret=…&next=/app/settings%3Fpair%3D1` (signed in, straight to the pairing QR code). Keep the file private |
 
 Tray app: `GRAYJAY_SERVER_PATH` (server binary), `GRAYJAY_PORT`, `GRAYJAY_DATA_DIR`, `GRAYJAY_TRAY_NO_OPEN=1` (don't open the browser on first run).
 
