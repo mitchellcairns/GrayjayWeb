@@ -159,3 +159,6 @@ html:has(.vp.app-fullscreen) .watch { z-index: 60; }
   animation: toast-in 0.15s var(--ease);
 }
 .vp-scrub-cancel.over { background: var(--danger); border-color: transparent; transform: translateX(-50%) scale(1.08); }
+/* [GrayjayWeb] Recovering from a playback error: spinner plus a line under it. */
+.vp-center.recovering { grid-auto-flow: row; align-content: center; gap: 10px; }
+.vp-recover { margin: 0; color: #fff; font-size: 14px; text-shadow: 0 1px 3px rgb(0 0 0 / 0.6); }

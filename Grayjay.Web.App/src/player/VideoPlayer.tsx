@@ -131,14 +131,20 @@ export default function VideoPlayer(props: {
       shakaPlayer = new shaka.Player();
       await shakaPlayer.attach(el);
       shakaPlayer.configure({
-        streaming: { bufferingGoal: 40, rebufferingGoal: 1.5, bufferBehind: 30, retryParameters: { maxAttempts: 4, baseDelay: 500, timeout: 30000 } },
+        streaming: { bufferingGoal: 40, rebufferingGoal: 1.5, bufferBehind: 30, retryParameters: { maxAttempts: 5, baseDelay: 1000, backoffFactor: 2, timeout: 30000 } },
         manifest: { retryParameters: { maxAttempts: 3, timeout: 30000 } },
         abr: { enabled: true },
       });
       shakaPlayer.addEventListener("error", (e: any) => {
-        console.error("shaka", e.detail);
-        setPlayError(`Playback error (${e.detail?.code ?? "unknown"})`);
+        const err = e.detail;
+        console.error("shaka", err);
+        // [GrayjayWeb] Recoverable errors (a caption file that didn't load, say): Shaka carries on by itself, so
+        // don't cover a playing video with an error.
+        if (err?.severity === 1) return;
+        playbackFailed(`Playback error (${err?.code ?? "unknown"})`, HEALABLE.has(err?.category));
       });
+      // Shaka buffers by setting playbackRate to 0, which doesn't always fire "waiting": show the spinner from its own event.
+      shakaPlayer.addEventListener("buffering", (e: any) => setWaiting(!!e.buffering));
     }
     return shakaPlayer;
   }
@@ -163,6 +169,7 @@ export default function VideoPlayer(props: {
     setPlayError(null);
     setNeedsTap(false);
     setSeekTarget(null);
+    lastAutoplay = autoplay;
     if (!src) return;
     player.setMediaUrl(player.url());
     try {
@@ -202,11 +209,124 @@ export default function VideoPlayer(props: {
       }
       el.playbackRate = rate();
       if (autoplay) await play();
+      // Recovered but paused (or the browser wants a tap first): nothing more to wait for.
+      if (recovering() && el.paused) setRecovering(false);
     } catch (e: any) {
       console.error("load", e);
-      setPlayError(e?.message ? `Couldn't start playback: ${e.message}` : `Couldn't start playback (${e?.code ?? "error"})`);
+      playbackFailed(e?.message ? `Couldn't start playback: ${e.message}` : `Couldn't start playback (${e?.code ?? "error"})`,
+        HEALABLE.has(e?.category));
     }
   }
+
+  // ---------- Recovering from playback errors ----------
+  // [GrayjayWeb] A connection that drops while the screen is off (or stream links that expire) used to leave the video
+  // stopped on an error until the app was reloaded. Now the player asks the server for fresh links and carries on from
+  // the same spot, retrying with growing delays (and right away when the phone is back online or the screen comes
+  // back on). The error only shows once that keeps failing.
+  const HEALABLE = new Set([1, 3, 4, 5]); // Shaka error categories: network, media, manifest, streaming
+  const HEAL_DELAYS = [500, 2000, 5000, 10000, 20000, 30000, 60000, 60000];
+  const [recovering, setRecovering] = createSignal(false);
+  let healAttempts = 0, healTimer: number | undefined, healBusy = false, healOkTimer: number | undefined;
+  let healAt = 0, healResume = false, healMessage = "", lastAutoplay = false;
+  const stopHealing = () => {
+    clearTimeout(healTimer); healTimer = undefined;
+    healAttempts = 0;
+    setRecovering(false);
+  };
+  function playbackFailed(message: string, healable: boolean) {
+    clearTimeout(healOkTimer);
+    // Before the video ever played, a couple of quick tries only: it may simply not be playable.
+    const max = player.started() ? HEAL_DELAYS.length : 2;
+    if (!healable || !props.source || healAttempts >= max) {
+      stopHealing();
+      setPlayError(message);
+      return;
+    }
+    if (!recovering()) {
+      const t = seekTarget() ?? el.currentTime;
+      if (t > 0) healAt = t;
+      healResume = player.started() ? !el.paused || waiting() : lastAutoplay;
+    }
+    healMessage = message;
+    setPlayError(null);
+    setRecovering(true);
+    clearTimeout(healTimer);
+    healTimer = window.setTimeout(heal, HEAL_DELAYS[healAttempts++]);
+  }
+  async function heal() {
+    healTimer = undefined;
+    const src = props.source;
+    if (healBusy || !src || !navigator.onLine) return; // offline: the "online" listener tries again
+    healBusy = true;
+    // What was already buffered may have kept playing since the error: carry on from there.
+    const t = seekTarget() ?? el.currentTime;
+    if (t > 0) healAt = t;
+    try {
+      if (player.isLocal()) await loadSource(src, healAt, healResume); // the downloaded copy: just open it again
+      else {
+        pendingAutoplay = healResume; // read by the source effect when the fresh source arrives
+        if (!(await player.refresh(healAt))) { pendingAutoplay = null; stopHealing(); }
+      }
+    } catch (e) {
+      console.warn("recover", e);
+      pendingAutoplay = null;
+      playbackFailed(healMessage, true);
+    } finally {
+      healBusy = false;
+    }
+  }
+  const healNow = () => {
+    if (!recovering() || healBusy || !navigator.onLine || document.visibilityState !== "visible") return;
+    clearTimeout(healTimer);
+    heal();
+  };
+  addEventListener("online", healNow);
+  document.addEventListener("visibilitychange", healNow);
+  onCleanup(() => {
+    removeEventListener("online", healNow);
+    document.removeEventListener("visibilitychange", healNow);
+    clearTimeout(healTimer); clearTimeout(healOkTimer);
+  });
+  // Another video: whatever was being recovered no longer matters.
+  createEffect(on(() => player.url(), () => { stopHealing(); healAt = 0; }, { defer: true }));
+  const onPlayingAgain = () => {
+    if (!recovering() && !healAttempts) return;
+    setRecovering(false);
+    // Playing steadily again: the next failure starts from quick retries.
+    clearTimeout(healOkTimer);
+    healOkTimer = window.setTimeout(() => { healAttempts = 0; }, 30000);
+  };
+  // Retry on the error: same spot, fresh links.
+  const retryNow = () => {
+    if (props.error || !props.source) { player.retry(); return; }
+    const t = seekTarget() ?? el.currentTime;
+    if (t > 0) healAt = t;
+    healResume = true;
+    healAttempts = 0;
+    healMessage = playError() ?? "Playback error";
+    setPlayError(null);
+    setRecovering(true);
+    clearTimeout(healTimer);
+    heal();
+  };
+
+  // A stream that stops loading without an error (a request that hangs, retries that never end): 40 s without the
+  // playhead moving while it should be playing counts as a failure. (Not readyState: Chrome can report enough data
+  // while stuck half a second before the end of what's buffered.)
+  // `frozen` also shows the spinner: Chrome may not fire "waiting" then, so the video looked like it was playing.
+  const [frozen, setFrozen] = createSignal(false);
+  let stuckSince = 0, stuckAt = -1;
+  const stallTimer = window.setInterval(() => {
+    // (Shaka holds playback with playbackRate 0 while it buffers, so that counts as stuck too.)
+    const still = !!props.source && !el.paused && !el.ended && el.currentTime === stuckAt;
+    setFrozen(still);
+    const stuck = still && !props.loading && !recovering() && !playError() && navigator.onLine;
+    stuckAt = el.currentTime;
+    if (!stuck) { stuckSince = 0; return; }
+    if (!stuckSince) stuckSince = Date.now();
+    else if (Date.now() - stuckSince > 40000) { stuckSince = 0; playbackFailed("Playback stopped loading", true); }
+  }, 5000);
+  onCleanup(() => clearInterval(stallTimer));
 
   // ---------- Audio only ----------
   // Switching reloads the same stream with or without video at the current position (a second or so of rebuffering).
@@ -634,17 +754,23 @@ export default function VideoPlayer(props: {
         onPlay={() => { setPlaying(true); player.setPlaying(true); }}
         onPause={() => { setPlaying(false); player.setPlaying(false); setTime(el.currentTime); reportProgress(true); }}
         onWaiting={() => setWaiting(true)}
-        onPlaying={() => { setWaiting(false); player.setStarted(true); }}
+        onPlaying={() => { setWaiting(false); player.setStarted(true); onPlayingAgain(); }}
         onCanPlay={() => setWaiting(false)}
         onSeeking={() => setWaiting(true)}
         onSeeked={() => { setWaiting(false); setSeekTarget(null); setTime(el.currentTime); updatePositionState(); }}
-        onTimeUpdate={() => { if (!playing()) setTime(el.currentTime); updateBuffered(); reportProgress(); }}
+        onTimeUpdate={() => { if (frozen() && el.currentTime !== stuckAt) setFrozen(false); if (!playing()) setTime(el.currentTime); updateBuffered(); reportProgress(); }}
         onDurationChange={() => { setDuration(isFinite(el.duration) ? el.duration : 0); updatePositionState(); }}
-        onRateChange={() => { setRate(el.playbackRate); updatePositionState(); }}
+        onRateChange={() => { if (el.playbackRate > 0) setRate(el.playbackRate); updatePositionState(); }}
         onVolumeChange={() => { setVolume(el.volume); setMuted(el.muted); prefs.setVolume(el.volume); prefs.setMuted(el.muted); }}
         onProgress={updateBuffered}
         onEnded={() => { setPlaying(false); reportProgress(true); props.onEnded?.(); }}
-        onError={() => { if (!shakaPlayer?.getLoadMode?.()) setPlayError("This video couldn't be played."); }}
+        onError={() => {
+          // Shaka reports its own errors. Aborted loads (a new source) aren't failures. An unsupported source after the
+          // video already played is a stream link that stopped working, so that one is worth recovering too.
+          const code = el.error?.code ?? 0;
+          if (usingShaka() || code === 1) return;
+          playbackFailed("This video couldn't be played.", code === 2 || code === 3 || (code === 4 && player.started()));
+        }}
       />
 
       <Show when={prefs.audioOnly() && props.source}>
@@ -663,8 +789,11 @@ export default function VideoPlayer(props: {
         <div class={`vp-seek-hint ${seekHint()!.side}`}><Icon name={seekHint()!.side === "left" ? "rewind" : "ffwd"} filled /> {seekHint()!.n}s</div>
       </Show>
 
-      <Show when={(props.loading || waiting()) && !props.error && !playError()}>
-        <div class="vp-center"><div class="spinner vp-spinner" /></div>
+      <Show when={(props.loading || waiting() || frozen() || (recovering() && !playing())) && !props.error && !playError()}>
+        <div class="vp-center" classList={{ recovering: recovering() }}>
+          <div class="spinner vp-spinner" />
+          <Show when={recovering() && !props.mini}><p class="vp-recover">Reconnecting…</p></Show>
+        </div>
       </Show>
 
       <Show when={props.error || playError()}>
@@ -675,7 +804,7 @@ export default function VideoPlayer(props: {
             <Show when={props.onPrevious && props.hasPreviousVideo}>
               <button class="btn small" onClick={() => props.onPrevious!()}><Icon name="previous" size={16} /> Previous</button>
             </Show>
-            <button class="btn small" onClick={() => player.retry()}>Retry</button>
+            <button class="btn small" onClick={retryNow}>Retry</button>
             <Show when={props.onNext}>
               <button class="btn small" onClick={() => props.onNext!()}>Next <Icon name="skip" size={16} /></button>
             </Show>

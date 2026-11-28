@@ -291,6 +291,30 @@ function createPlayerStore() {
 
     retry() { const u = url(); if (u) load(u); },
 
+    /**
+     * [GrayjayWeb] Playback broke (a dropped connection while the screen was off, stream links that expired):
+     * asks the server to load the video again, which gets fresh stream links, then plays the same tracks from `at`.
+     * The watch page keeps its details. Resolves false when another video has started meanwhile; throws when the
+     * server can't be reached or the video can't be loaded.
+     */
+    async refresh(at: number): Promise<boolean> {
+      const target = url(), cur = source(), token = loadToken;
+      if (!target || !cur) return false;
+      const { video: v, superseded } = await details.videoLoad(target);
+      if (token !== loadToken || superseded) return false;
+      if (!v) throw new Error("This video couldn't be loaded again");
+      const vi = cur.videoIndex ?? -1, ai = cur.audioIndex ?? -1, si = cur.subtitleIndex ?? -1;
+      let src: SourceDescriptor;
+      try {
+        src = vi === -1 && ai === -1 ? await details.sourceAuto(target) : await details.sourceProxy(target, vi, ai, si);
+      } catch {
+        src = await details.sourceAuto(target);
+      }
+      if (token !== loadToken) return false;
+      batch(() => { setStartAt(at); setSource(src); });
+      return true;
+    },
+
     /** True while the downloaded copy plays (quality/audio/caption menus don't apply to it). */
     isLocal: () => !!source()?.url?.startsWith("blob:"),
 

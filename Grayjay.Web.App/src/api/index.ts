@@ -160,7 +160,10 @@ export const handling = {
 };
 
 // ---------- Playback ----------
-let videoRequestId = 0;
+// [GrayjayWeb] The server ignores a video load numbered lower than the last one this window sent. The window ID
+// survives a page reload (sessionStorage) but this counter didn't, so after a reload videos failed to load ("This video
+// couldn't be loaded") until it caught up. Starting from the clock keeps it rising across reloads.
+let videoRequestId = Date.now();
 export const details = {
   videoLoad: async (url: string) => {
     const requestId = ++videoRequestId;
