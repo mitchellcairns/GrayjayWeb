@@ -304,7 +304,11 @@ namespace Grayjay.ClientServer.Controllers
             if (modifierId != null)
                 DetailsState.Modifiers.TryGetValue(modifierId, out modifier);
 
-            var playlist = await GenerateProxiedHLS(url, proxyMedia, $"{Request.Scheme}://{Request.Host.Value}", state, modifier, modifierId);
+            // [GrayjayWeb] Web mode: same-origin relative URLs (like BaseUrl ""), not the host the request came in on. Behind
+            // a tunnel or reverse proxy that host resolves to the proxy's public IP, and segments were then handed out as
+            // http://<that ip>:<random port>/…, which no browser can reach (Twitch live: "Shaka error 1002").
+            var baseUri = HttpProxy.PublicPrefix != null ? "" : $"{Request.Scheme}://{Request.Host.Value}";
+            var playlist = await GenerateProxiedHLS(url, proxyMedia, baseUri, state, modifier, modifierId);
 
             return new ContentResult()
             {
@@ -407,10 +411,11 @@ namespace Grayjay.ClientServer.Controllers
             if (!proxyMedia)
                 return hlsMediaPlaylist;
 
-            var uri = new Uri(baseUri);
-
             IPAddress? ip = null;
-            if (!IPAddress.TryParse(uri.Host, out ip) || ip == null)
+            // [GrayjayWeb] A relative base (web mode) means the same-origin /hp forwarder, which serves the loopback proxy.
+            if (!Uri.TryCreate(baseUri, UriKind.Absolute, out var uri))
+                ip = IPAddress.Loopback;
+            else if (!IPAddress.TryParse(uri.Host, out ip) || ip == null)
             {
                 if (uri.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase))
                     ip = IPAddress.Loopback;
