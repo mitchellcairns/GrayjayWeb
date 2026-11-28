@@ -7,15 +7,16 @@ import Shell from "./shell/Shell";
 import PairScreen from "./pages/Pair";
 import Subscriptions from "./pages/Subscriptions";
 import { offline, offlineMode, setOfflineMode } from "./lib/offline";
+import { page } from "./lib/update";
 
-const Home = lazy(() => import("./pages/Home"));
-const Setup = lazy(() => import("./pages/Setup"));
-const Search = lazy(() => import("./pages/Search"));
-const Library = lazy(() => import("./pages/Library"));
-const Channel = lazy(() => import("./pages/Channel"));
-const Sources = lazy(() => import("./pages/Sources"));
-const Settings = lazy(() => import("./pages/Settings"));
-const Share = lazy(() => import("./pages/Share"));
+const Home = lazy(page(() => import("./pages/Home")));
+const Setup = lazy(page(() => import("./pages/Setup")));
+const Search = lazy(page(() => import("./pages/Search")));
+const Library = lazy(page(() => import("./pages/Library")));
+const Channel = lazy(page(() => import("./pages/Channel")));
+const Sources = lazy(page(() => import("./pages/Sources")));
+const Settings = lazy(page(() => import("./pages/Settings")));
+const Share = lazy(page(() => import("./pages/Share")));
 
 export default function App() {
   const [status, { refetch }] = createResource(() => auth.status().catch(() => null));

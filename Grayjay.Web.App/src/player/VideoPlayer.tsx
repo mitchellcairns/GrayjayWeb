@@ -8,12 +8,13 @@ import { player, prefs } from "./store";
 import { QueueButton } from "../components/GlobalSheets";
 import { consumeSuppressedTap } from "./gesture";
 import { toast } from "../components/Toasts";
+import { page } from "../lib/update";
 import "./VideoPlayer.css";
 
 // Shaka (~900 KB) is only fetched the first time something plays.
 let shakaModule: Promise<any> | null = null;
 function loadShaka() {
-  shakaModule ??= import("shaka-player/dist/shaka-player.compiled.js").then((m) => {
+  shakaModule ??= page(() => import("shaka-player/dist/shaka-player.compiled.js"))().then((m) => {
     const shaka = m.default;
     shaka.polyfill.installAll();
     return shaka;
